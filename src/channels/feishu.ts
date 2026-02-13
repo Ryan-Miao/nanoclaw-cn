@@ -6,6 +6,7 @@ import * as Lark from '@larksuiteoapi/node-sdk';
 
 import { logger } from '../logger.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup, NewMessage } from '../types.js';
+import { FEISHU_DOC_THRESHOLD } from '../config.js';
 
 export interface FeishuChannelOpts {
   appId: string;
@@ -131,6 +132,12 @@ export class FeishuChannel implements Channel {
     }
 
     try {
+      // 检查消息长度，超过阈值则分块发送
+      if (text.length > FEISHU_DOC_THRESHOLD) {
+        await this.handleLongContent(chatId, text);
+        return;
+      }
+
       const resp = await this.client.im.v1.message.create({
         params: {
           receive_id_type: 'chat_id',
@@ -151,6 +158,62 @@ export class FeishuChannel implements Channel {
       this.outgoingQueue.push({ chatId, text });
       logger.warn({ chatId, err, queueSize: this.outgoingQueue.length }, 'Failed to send, message queued');
     }
+  }
+
+  /**
+   * 处理长内容：分块发送或截断
+   * 飞书消息长度限制约 4000 字符
+   */
+  private async handleLongContent(chatId: string, content: string): Promise<void> {
+    const MAX_LENGTH = 3500; // 飞书消息长度限制
+    const chunks: string[] = [];
+
+    // 按段落分割内容
+    let currentChunk = '';
+    const paragraphs = content.split('\n');
+
+    for (const para of paragraphs) {
+      const testChunk = currentChunk + para + '\n';
+
+      if (testChunk.length > MAX_LENGTH) {
+        if (currentChunk) {
+          chunks.push(currentChunk.trim());
+        }
+        currentChunk = para + '\n';
+      } else {
+        currentChunk = testChunk;
+      }
+    }
+
+    if (currentChunk) {
+      chunks.push(currentChunk.trim());
+    }
+
+    logger.info({ totalLength: content.length, chunkCount: chunks.length }, 'Splitting long message into chunks');
+
+    // 发送分块消息
+    for (let i = 0; i < chunks.length; i++) {
+      const prefix = chunks.length > 1 ? `[${i + 1}/${chunks.length}] ` : '';
+      const chunkContent = prefix + chunks[i];
+
+      await this.client.im.v1.message.create({
+        params: {
+          receive_id_type: 'chat_id',
+        },
+        data: {
+          receive_id: chatId,
+          msg_type: 'text',
+          content: JSON.stringify({ text: chunkContent }),
+        },
+      });
+
+      // 分块之间添加延迟，避免频率限制
+      if (i < chunks.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    logger.info({ chatId, chunkCount: chunks.length }, 'Sent message in chunks');
   }
 
   isConnected(): boolean {

@@ -53,3 +53,10 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Feishu document settings
+export const FEISHU_DOC_THRESHOLD = parseInt(
+  process.env.FEISHU_DOC_THRESHOLD || '2000',
+  10,
+); // characters threshold - if message is longer, create a document
+export const FEISHU_DOC_TITLE = 'NanoClaw 消息文档';
