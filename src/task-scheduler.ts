@@ -1,10 +1,7 @@
 import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
-import fs from 'fs';
-import path from 'path';
 
 import {
-  GROUPS_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   SCHEDULER_POLL_INTERVAL,
@@ -35,8 +32,6 @@ async function runTask(
   deps: SchedulerDependencies,
 ): Promise<void> {
   const startTime = Date.now();
-  const groupDir = path.join(GROUPS_DIR, task.group_folder);
-  fs.mkdirSync(groupDir, { recursive: true });
 
   logger.info(
     { taskId: task.id, group: task.group_folder },

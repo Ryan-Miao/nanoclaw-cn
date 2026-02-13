@@ -72,9 +72,13 @@ FEISHU_APP_SECRET=你的飞书应用密钥
    - 创建企业自建应用
    - 在「凭证与基础信息」获取 App ID 和 App Secret
    - 在「事件与回调」中启用事件订阅
+   - 在「权限管理」中添加权限：`docx:document`、`docx:document:share`、`drive:drive:readonly`、`drive:file:search`
+   - （可选）配置 `FEISHU_ADMIN_USER_ID` 以自动添加管理员权限
+   - 获取用户 ID 方法：发送任意消息给机器人，日志中会显示 `sender` 字段
+   - 长消息文档会自动按 `Plans/{群组名称}/` 结构组织存储
    - ![飞书应用配置](./docs/img/image.png)
    - ![最终效果](./docs/img/image2.png)
-   - 第一步是你先要启动起来，长链接先有,然后才能修改应用长链接配置。
+   - 说明：第一步要先启动起来，长链接配置才能修改
 
 ### 步骤 3：安装依赖
 
@@ -149,7 +153,7 @@ NanoClaw 在您 8 分钟就能理解的代码库中提供相同的核心功能�
 - **网络访问** - 搜索和获取内容
 - **容器隔离** - Agent 在 Docker 容器中沙箱化
 - **Agent 群体** - 组建专业 agent 团队协作处理复杂任务（首个支持此功能的个人 AI 助手）
-- **长消息分块** - 回复超过 2000 字符时自动分块发送，确保内容完整
+- **长消息飞书文档** - 回复超过 4000 字符时自动创建飞书文档并发送链接，确保内容完整
 - **可选集成** - 通过技能添加 Gmail (`/add-gmail`) 等
 
 ## 使用方法
@@ -215,14 +219,16 @@ NanoClaw 在您 8 分钟就能理解的代码库中提供相同的核心功能�
 ## 架构
 
 ```
-WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) --> 响应
+Channel (飞书/WhatsApp) --> SQLite --> 队列 --> 容器 (Claude Agent SDK) --> 响应
 ```
 
-单 Node.js 进程。Agent 在挂载目录的隔离 Linux 容器中执行。每群组消息队列，带并发控制。通过文件系统进行 IPC。
+单 Node.js 进程 + 按需启动的 Docker 容器。主进程负责消息路由和调度，不加载 Claude；容器内运行 Claude Agent SDK，通过挂载目录获得认证和上下文。每群组隔离执行，互不干扰。
+
+**详细架构文档**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - 包含消息流、容器挂载、日志流、IPC 通信等完整说明。
 
 核心文件：
 - `src/index.ts` - 编排器：状态、消息循环、agent 调用
-- `src/channels/whatsapp.ts` - WhatsApp 连接、认证、发送/接收
+- `src/channels/feishu.ts` - 飞书连接、认证、发送/接收
 - `src/ipc.ts` - IPC 监听器和任务处理
 - `src/router.ts` - 消息格式化和出站路由
 - `src/group-queue.ts` - 每群组队列，带全局并发限制

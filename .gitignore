@@ -29,4 +29,9 @@ groups/global/*
 .idea/
 .vscode/
 
+# MCP tools cache
+.playwright-mcp/
+
 agents-sdk-docs
+# plan file
+docs/plans

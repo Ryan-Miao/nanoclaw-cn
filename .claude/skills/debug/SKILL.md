@@ -18,10 +18,11 @@ src/container-runner.ts               container/agent-runner/
     │ with volume mounts                   │ with MCP servers
     │                                      │
     ├── data/env/env ──────────────> /workspace/env-dir/env
-    ├── groups/{folder} ───────────> /workspace/group
+    ├── groups/{folder} ───────────> /workspace/group (read-only)
+    ├── groups/global ─────────────> /workspace/global (read-only)
+    ├── data/workspace/{folder} ───> /workspace/data (read-write)
     ├── data/ipc/{folder} ────────> /workspace/ipc
-    ├── data/sessions/{folder}/.claude/ ──> /home/node/.claude/ (isolated per-group)
-    └── (main only) project root ──> /workspace/project
+    └── data/sessions/{folder}/.claude/ ──> /home/node/.claude/ (isolated per-group)
 ```
 
 **Important:** The container runs as user `node` with `HOME=/home/node`. Session files must be mounted to `/home/node/.claude/` (not `/root/.claude/`) for session resumption to work.
@@ -114,9 +115,10 @@ Expected structure:
 ```
 /workspace/
 ├── env-dir/env           # Environment file (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)
-├── group/                # Current group folder (cwd)
-├── project/              # Project root (main channel only)
-├── global/               # Global CLAUDE.md (non-main only)
+├── group/                # Group CLAUDE.md (read-only)
+├── global/               # Global CLAUDE.md (read-only)
+├── data/                 # Agent workspace (read-write, cwd)
+│   └── conversations/    # Conversation history
 ├── ipc/                  # Inter-process communication
 │   ├── messages/         # Outgoing WhatsApp messages
 │   ├── tasks/            # Scheduled task commands
@@ -178,14 +180,15 @@ If an MCP server fails to start, the agent may exit. Check the container logs fo
 ### Test the full agent flow:
 ```bash
 # Set up env file
-mkdir -p data/env groups/test
+mkdir -p data/env groups/test data/workspace/test
 cp .env data/env/env
 
 # Run test query
 echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMain":false}' | \
   container run -i \
   --mount "type=bind,source=$(pwd)/data/env,target=/workspace/env-dir,readonly" \
-  -v $(pwd)/groups/test:/workspace/group \
+  --mount "type=bind,source=$(pwd)/groups/test,target=/workspace/group,readonly" \
+  -v $(pwd)/data/workspace/test:/workspace/data \
   -v $(pwd)/data/ipc:/workspace/ipc \
   nanoclaw-agent:latest
 ```
@@ -213,7 +216,7 @@ The agent-runner uses these Claude Agent SDK options:
 query({
   prompt: input.prompt,
   options: {
-    cwd: '/workspace/group',
+    cwd: '/workspace/data',
     allowedTools: ['Bash', 'Read', 'Write', ...],
     permissionMode: 'bypassPermissions',
     allowDangerouslySkipPermissions: true,  // Required with bypassPermissions

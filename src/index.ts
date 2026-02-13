@@ -87,9 +87,9 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   registeredGroups[jid] = group;
   setRegisteredGroup(jid, group);
 
-  // Create group folder
-  const groupDir = path.join(DATA_DIR, '..', 'groups', group.folder);
-  fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
+  // Create logs directory (runtime data goes to data/logs/)
+  const logsDir = path.join(DATA_DIR, 'logs', group.folder);
+  fs.mkdirSync(logsDir, { recursive: true });
 
   logger.info(
     { jid, name: group.name, folder: group.folder },
