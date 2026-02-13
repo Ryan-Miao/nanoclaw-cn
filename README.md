@@ -62,8 +62,8 @@ FEISHU_APP_SECRET=你的飞书应用密钥
 **如何获取这些值？**
 
 1. **智谱 AI API Key**
-   - 访问 [智谱 AI 开放平台](https://open.bigmodel.cn/)
-   - 注册账号并登录
+   - 访问 [智谱 AI 开放平台](https://www.bigmodel.cn/glm-coding?ic=B9FBAXMVQJ)
+   - 注册账号并登录, ps 使用wo的链接注册会便宜: https://www.bigmodel.cn/glm-coding?ic=B9FBAXMVQJ
    - 进入「API 密钥」页面创建新密钥
    - 复制 API Key 到 `ANTHROPIC_AUTH_TOKEN`
 
@@ -72,8 +72,9 @@ FEISHU_APP_SECRET=你的飞书应用密钥
    - 创建企业自建应用
    - 在「凭证与基础信息」获取 App ID 和 App Secret
    - 在「事件与回调」中启用事件订阅
-   - ![飞书应用配置](./docs/img/feishu-app.png)
-   - ![事件订阅配置](./docs/img/feishu-event.png)
+   - ![飞书应用配置](./docs/img/image.png)
+   - ![最终效果](./docs/img/image2.png)
+   - 第一步是你先要启动起来，长链接先有,然后才能修改应用长链接配置。
 
 ### 步骤 3：安装依赖
 
