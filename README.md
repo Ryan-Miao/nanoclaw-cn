@@ -14,6 +14,97 @@
 
 ---
 
+## 前置要求
+
+开始前，请确保您的系统已安装：
+
+| 要求 | 最低版本 | 用途 | 安装 |
+|------|----------|------|------|
+| **Node.js** | 20+ | 运行项目 | [nodejs.org](https://nodejs.org/) |
+| **Docker** | 任意版本 | 运行 AI 容器 | [docker.com](https://www.docker.com/products/docker-desktop) |
+| **Claude Code** | 最新版 | AI 助手配置工具 | [claude.ai/download](https://claude.ai/download) |
+
+检查是否安装成功：
+```bash
+node --version    # 应显示 v20.x.x 或更高
+docker --version  # 应显示 Docker 版本
+claude --version  # 应显示 Claude Code 版本
+```
+
+## 安装步骤
+
+### 步骤 1：克隆项目
+
+```bash
+git clone https://github.com/Ryan-Miao/nanoclaw-cn.git
+cd nanoclaw
+```
+
+### 步骤 2：配置环境变量
+
+```bash
+# 复制配置模板
+cp .env.template .env
+```
+
+编辑 `.env` 文件，填入以下**必需**配置：
+
+```bash
+# 智谱 AI (必填)
+ANTHROPIC_AUTH_TOKEN=你的智谱API密钥
+ANTHROPIC_BASE_URL=https://open.bigmodel.cn/api/anthropic
+
+# 飞书机器人 (必填)
+FEISHU_APP_ID=你的飞书应用ID
+FEISHU_APP_SECRET=你的飞书应用密钥
+```
+
+**如何获取这些值？**
+
+1. **智谱 AI API Key**
+   - 访问 [智谱 AI 开放平台](https://open.bigmodel.cn/)
+   - 注册账号并登录
+   - 进入「API 密钥」页面创建新密钥
+   - 复制 API Key 到 `ANTHROPIC_AUTH_TOKEN`
+
+2. **飞书应用配置**
+   - 访问 [飞书开放平台](https://open.feishu.cn/)
+   - 创建企业自建应用
+   - 在「凭证与基础信息」获取 App ID 和 App Secret
+   - 在「事件与回调」中启用事件订阅
+   - ![飞书应用配置](./docs/img/feishu-app.png)
+   - ![事件订阅配置](./docs/img/feishu-event.png)
+
+### 步骤 3：安装依赖
+
+```bash
+npm install
+```
+
+### 步骤 4：启动项目
+
+```bash
+npm run dev
+```
+
+看到以下输出表示启动成功：
+```
+[INFO] Connected to Feishu
+[INFO] Scheduler loop started
+[INFO] NanoClaw running (trigger: @Andy, channel: Feishu)
+```
+
+### 步骤 5：测试机器人
+
+在飞书中，向您配置的应用发送消息：
+```
+@Andy 你好
+```
+
+机器人回复后即表示运行正常！
+
+---
+
 ## 本项目说明
 
 本项目 fork 自 [gavrielc/nanoclaw](https://github.com/gavrielc/nanoclaw.git)，主要改造如下：
@@ -31,38 +122,6 @@
 [OpenClaw](https://github.com/openclaw/openclaw) 是一个愿景很棒的项目。但我无法安心运行那些我不理解且能访问我生活的软件。OpenClaw 有 52+ 个模块、8 个配置管理文件、45+ 个依赖项，以及 15 个通道提供商的抽象层。安全性处于应用级别（允许列表、配对代码），而非操作系统隔离。所有内容运行在一个共享内存的 Node 进程中。
 
 NanoClaw 在您 8 分钟就能理解的代码库中提供相同的核心功能。单进程，少量文件。Agent 运行在真正的 Linux 容器中，具有文件系统隔离，而非依赖权限检查。
-
-## 快速开始
-
-```bash
-git clone https://github.com/Ryan-Miao/nanoclaw-cn.git
-cd nanoclaw
-claude
-```
-
-然后运行 `/setup`。Claude Code 会处理一切：依赖、认证、容器设置、服务配置。
-
-### 环境变量配置
-
-项目根目录提供了 `.env.template` 模板文件，包含所有可配置的环境变量。
-
-```bash
-# 复制模板并填入真实值
-cp .env.template .env
-```
-
-**必需配置：**
-
-| 变量 | 说明 | 获取方式 |
-|------|------|----------|
-| `ANTHROPIC_AUTH_TOKEN` | 智谱 AI API Key | 访问 [智谱 AI 开放平台](https://open.bigmodel.cn/) 注册获取 |
-| `ANTHROPIC_BASE_URL` | 智谱 AI API 地址 | `https://open.bigmodel.cn/api/anthropic` |
-| `FEISHU_APP_ID` | 飞书应用 ID | [飞书开放平台](https://open.feishu.cn/) 创建应用后获取 |
-| `FEISHU_APP_SECRET` | 飞书应用密钥 | 同上 |
-
-**可选配置：** 助手名称、容器超时、日志级别等，详见 `.env.template` 文件内注释。
-
-> ⚠️ **安全提示**：`.env` 文件包含敏感信息，已在 `.gitignore` 中排除，请勿提交到代码仓库。
 
 ## 设计理念
 
