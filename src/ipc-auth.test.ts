@@ -591,4 +591,65 @@ describe('register_group success', () => {
 
     expect(getRegisteredGroup('partial@g.us')).toBeUndefined();
   });
+
+  it('register_group passes requiresTrigger=false to registerGroup', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'auto@g.us',
+        name: 'Auto Group',
+        folder: 'auto-group',
+        trigger: '@Andy',
+        requiresTrigger: false,
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    const group = getRegisteredGroup('auto@g.us');
+    expect(group).toBeDefined();
+    expect(group!.requiresTrigger).toBe(false);
+  });
+
+  it('register_group passes requiresTrigger=true to registerGroup', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'manual@g.us',
+        name: 'Manual Group',
+        folder: 'manual-group',
+        trigger: '@Andy',
+        requiresTrigger: true,
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    const group = getRegisteredGroup('manual@g.us');
+    expect(group).toBeDefined();
+    expect(group!.requiresTrigger).toBe(true);
+  });
+
+  it('register_group defaults requiresTrigger to true when not specified', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'default@g.us',
+        name: 'Default Group',
+        folder: 'default-group',
+        trigger: '@Andy',
+        // requiresTrigger not specified - defaults to true
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    const group = getRegisteredGroup('default@g.us');
+    expect(group).toBeDefined();
+    // When not specified, DB defaults to true (requires trigger)
+    expect(group!.requiresTrigger).toBe(true);
+  });
 });
