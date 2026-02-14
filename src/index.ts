@@ -468,14 +468,14 @@ async function main(): Promise<void> {
       onChatMetadata: (chatJid, timestamp) => storeChatMetadata(chatJid, timestamp),
       registeredGroups: () => registeredGroups,
       onAutoRegister: (chatId: string) => {
-        // 自动注册新群组为 main
-        const folder = 'main';
+        // 每个群组使用独立的 folder，确保隔离
+        const folder = `feishu-${chatId.slice(-6)}`;
         registerGroup(chatId, {
-          name: 'feishu-main',
+          name: `feishu-${chatId.slice(-6)}`,
           folder,
           trigger: ASSISTANT_NAME,
           added_at: new Date().toISOString(),
-          requiresTrigger: false,
+          requiresTrigger: true,  // 新群组默认需要触发词
         });
       },
     });
