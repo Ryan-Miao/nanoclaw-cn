@@ -468,11 +468,10 @@ async function main(): Promise<void> {
       onChatMetadata: (chatJid, timestamp) => storeChatMetadata(chatJid, timestamp),
       registeredGroups: () => registeredGroups,
       onAutoRegister: (chatId: string) => {
-        // 每个群组使用独立的 folder，确保隔离
-        const folder = `feishu-${chatId.slice(-6)}`;
+        // 自动注册新群组
         registerGroup(chatId, {
           name: `feishu-${chatId.slice(-6)}`,
-          folder,
+          folder: `feishu-${chatId.slice(-6)}`,
           trigger: ASSISTANT_NAME,
           added_at: new Date().toISOString(),
           requiresTrigger: true,  // 新群组默认需要触发词
