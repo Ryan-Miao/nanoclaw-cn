@@ -14,15 +14,14 @@ Host (macOS)                          Container (Linux VM)
 ─────────────────────────────────────────────────────────────
 src/container-runner.ts               container/agent-runner/
     │                                      │
-    │ spawns Apple Container               │ runs Claude Agent SDK
+    │ spawns container                      │ runs Claude Agent SDK
     │ with volume mounts                   │ with MCP servers
     │                                      │
     ├── data/env/env ──────────────> /workspace/env-dir/env
-    ├── groups/{folder} ───────────> /workspace/group (read-only)
-    ├── groups/global ─────────────> /workspace/global (read-only)
-    ├── data/workspace/{folder} ───> /workspace/data (read-write)
+    ├── groups/{folder} ───────────> /workspace/group
     ├── data/ipc/{folder} ────────> /workspace/ipc
-    └── data/sessions/{folder}/.claude/ ──> /home/node/.claude/ (isolated per-group)
+    ├── data/sessions/{folder}/.claude/ ──> /home/node/.claude/ (isolated per-group)
+    └── (main only) project root ──> /workspace/project
 ```
 
 **Important:** The container runs as user `node` with `HOME=/home/node`. Session files must be mounted to `/home/node/.claude/` (not `/root/.claude/`) for session resumption to work.
@@ -44,9 +43,11 @@ Set `LOG_LEVEL=debug` for verbose output:
 # For development
 LOG_LEVEL=debug npm run dev
 
-# For launchd service, add to plist EnvironmentVariables:
+# For launchd service (macOS), add to plist EnvironmentVariables:
 <key>LOG_LEVEL</key>
 <string>debug</string>
+# For systemd service (Linux), add to unit [Service] section:
+# Environment=LOG_LEVEL=debug
 ```
 
 Debug level shows:
@@ -81,44 +82,43 @@ cat .env  # Should show one of:
 
 ### 2. Environment Variables Not Passing
 
-**Apple Container Bug:** Environment variables passed via `-e` are lost when using `-i` (interactive/piped stdin).
+**Runtime note:** Environment variables passed via `-e` may be lost when using `-i` (interactive/piped stdin).
 
 **Workaround:** The system extracts only authentication variables (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) from `.env` and mounts them for sourcing inside the container. Other env vars are not exposed.
 
 To verify env vars are reaching the container:
 ```bash
-echo '{}' | container run -i \
-  --mount type=bind,source=$(pwd)/data/env,target=/workspace/env-dir,readonly \
+echo '{}' | docker run -i \
+  -v $(pwd)/data/env:/workspace/env-dir:ro \
   --entrypoint /bin/bash nanoclaw-agent:latest \
   -c 'export $(cat /workspace/env-dir/env | xargs); echo "OAuth: ${#CLAUDE_CODE_OAUTH_TOKEN} chars, API: ${#ANTHROPIC_API_KEY} chars"'
 ```
 
 ### 3. Mount Issues
 
-**Apple Container quirks:**
-- Only mounts directories, not individual files
-- `-v` syntax does NOT support `:ro` suffix - use `--mount` for readonly:
+**Container mount notes:**
+- Docker supports both `-v` and `--mount` syntax
+- Use `:ro` suffix for readonly mounts:
   ```bash
-  # Readonly: use --mount
-  --mount "type=bind,source=/path,target=/container/path,readonly"
+  # Readonly
+  -v /path:/container/path:ro
 
-  # Read-write: use -v
+  # Read-write
   -v /path:/container/path
   ```
 
 To check what's mounted inside a container:
 ```bash
-container run --rm --entrypoint /bin/bash nanoclaw-agent:latest -c 'ls -la /workspace/'
+docker run --rm --entrypoint /bin/bash nanoclaw-agent:latest -c 'ls -la /workspace/'
 ```
 
 Expected structure:
 ```
 /workspace/
 ├── env-dir/env           # Environment file (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)
-├── group/                # Group CLAUDE.md (read-only)
-├── global/               # Global CLAUDE.md (read-only)
-├── data/                 # Agent workspace (read-write, cwd)
-│   └── conversations/    # Conversation history
+├── group/                # Current group folder (cwd)
+├── project/              # Project root (main channel only)
+├── global/               # Global CLAUDE.md (non-main only)
 ├── ipc/                  # Inter-process communication
 │   ├── messages/         # Outgoing WhatsApp messages
 │   ├── tasks/            # Scheduled task commands
@@ -131,7 +131,7 @@ Expected structure:
 
 The container runs as user `node` (uid 1000). Check ownership:
 ```bash
-container run --rm --entrypoint /bin/bash nanoclaw-agent:latest -c '
+docker run --rm --entrypoint /bin/bash nanoclaw-agent:latest -c '
   whoami
   ls -la /workspace/
   ls -la /app/
@@ -154,7 +154,7 @@ grep -A3 "Claude sessions" src/container-runner.ts
 
 **Verify sessions are accessible:**
 ```bash
-container run --rm --entrypoint /bin/bash \
+docker run --rm --entrypoint /bin/bash \
   -v ~/.claude:/home/node/.claude \
   nanoclaw-agent:latest -c '
 echo "HOME=$HOME"
@@ -180,23 +180,22 @@ If an MCP server fails to start, the agent may exit. Check the container logs fo
 ### Test the full agent flow:
 ```bash
 # Set up env file
-mkdir -p data/env groups/test data/workspace/test
+mkdir -p data/env groups/test
 cp .env data/env/env
 
 # Run test query
 echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMain":false}' | \
-  container run -i \
-  --mount "type=bind,source=$(pwd)/data/env,target=/workspace/env-dir,readonly" \
-  --mount "type=bind,source=$(pwd)/groups/test,target=/workspace/group,readonly" \
-  -v $(pwd)/data/workspace/test:/workspace/data \
+  docker run -i \
+  -v $(pwd)/data/env:/workspace/env-dir:ro \
+  -v $(pwd)/groups/test:/workspace/group \
   -v $(pwd)/data/ipc:/workspace/ipc \
   nanoclaw-agent:latest
 ```
 
 ### Test Claude Code directly:
 ```bash
-container run --rm --entrypoint /bin/bash \
-  --mount "type=bind,source=$(pwd)/data/env,target=/workspace/env-dir,readonly" \
+docker run --rm --entrypoint /bin/bash \
+  -v $(pwd)/data/env:/workspace/env-dir:ro \
   nanoclaw-agent:latest -c '
   export $(cat /workspace/env-dir/env | xargs)
   claude -p "Say hello" --dangerously-skip-permissions --allowedTools ""
@@ -205,7 +204,7 @@ container run --rm --entrypoint /bin/bash \
 
 ### Interactive shell in container:
 ```bash
-container run --rm -it --entrypoint /bin/bash nanoclaw-agent:latest
+docker run --rm -it --entrypoint /bin/bash nanoclaw-agent:latest
 ```
 
 ## SDK Options Reference
@@ -216,7 +215,7 @@ The agent-runner uses these Claude Agent SDK options:
 query({
   prompt: input.prompt,
   options: {
-    cwd: '/workspace/data',
+    cwd: '/workspace/group',
     allowedTools: ['Bash', 'Read', 'Write', ...],
     permissionMode: 'bypassPermissions',
     allowDangerouslySkipPermissions: true,  // Required with bypassPermissions
@@ -238,7 +237,7 @@ npm run build
 ./container/build.sh
 
 # Or force full rebuild
-container builder prune -af
+docker builder prune -af
 ./container/build.sh
 ```
 
@@ -246,10 +245,10 @@ container builder prune -af
 
 ```bash
 # List images
-container images
+docker images
 
 # Check what's in the image
-container run --rm --entrypoint /bin/bash nanoclaw-agent:latest -c '
+docker run --rm --entrypoint /bin/bash nanoclaw-agent:latest -c '
   echo "=== Node version ==="
   node --version
 
@@ -329,11 +328,11 @@ echo -e "\n1. Authentication configured?"
 echo -e "\n2. Env file copied for container?"
 [ -f data/env/env ] && echo "OK" || echo "MISSING - will be created on first run"
 
-echo -e "\n3. Apple Container system running?"
-container system status &>/dev/null && echo "OK" || echo "NOT RUNNING - NanoClaw should auto-start it; check logs"
+echo -e "\n3. Container runtime running?"
+docker info &>/dev/null && echo "OK" || echo "NOT RUNNING - start Docker Desktop (macOS) or sudo systemctl start docker (Linux)"
 
 echo -e "\n4. Container image exists?"
-echo '{}' | container run -i --entrypoint /bin/echo nanoclaw-agent:latest "OK" 2>/dev/null || echo "MISSING - run ./container/build.sh"
+echo '{}' | docker run -i --entrypoint /bin/echo nanoclaw-agent:latest "OK" 2>/dev/null || echo "MISSING - run ./container/build.sh"
 
 echo -e "\n5. Session mount path correct?"
 grep -q "/home/node/.claude" src/container-runner.ts 2>/dev/null && echo "OK" || echo "WRONG - should mount to /home/node/.claude/, not /root/.claude/"
