@@ -3,14 +3,12 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  DISABLE_WHATSAPP,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
   hasFeishuConfig,
 } from './config.js';
-import { readEnvFile } from './env.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import { FeishuChannel } from './channels/feishu.js';
 import {
@@ -58,9 +56,6 @@ let messageLoopRunning = false;
 let whatsapp: WhatsAppChannel;
 let feishu: FeishuChannel | undefined;
 const channels: Channel[] = [];
-
-// Cache Feishu secrets from .env (not loaded into process.env for security)
-const feishuSecrets = readEnvFile(['FEISHU_APP_ID', 'FEISHU_APP_SECRET']);
 const queue = new GroupQueue();
 
 function loadState(): void {
@@ -482,40 +477,31 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Create and connect channels in parallel
-  if (!DISABLE_WHATSAPP) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-  }
+  // Create and connect channels
+  whatsapp = new WhatsAppChannel(channelOpts);
+  channels.push(whatsapp);
+  await whatsapp.connect();
 
   // Conditionally create Feishu channel if configured
-  logger.info({ hasFeishu: hasFeishuConfig() }, 'Checking Feishu configuration');
   if (hasFeishuConfig()) {
-    logger.info('Creating Feishu channel');
     feishu = new FeishuChannel({
       ...channelOpts,
-      appId: process.env.FEISHU_APP_ID || feishuSecrets.FEISHU_APP_ID!,
-      appSecret: process.env.FEISHU_APP_SECRET || feishuSecrets.FEISHU_APP_SECRET!,
+      appId: process.env.FEISHU_APP_ID!,
+      appSecret: process.env.FEISHU_APP_SECRET!,
       onAutoRegister: (chatId: string) => {
         // Auto-register new feishu groups with a generated folder name
-        // Feishu groups don't require @ trigger by default
         const folder = `feishu_${chatId.slice(-6)}`;
         registerGroup(chatId, {
           name: `Feishu Group ${chatId.slice(-6)}`,
           folder,
           trigger: '',
           added_at: new Date().toISOString(),
-          requiresTrigger: false,
         });
       },
     });
     channels.push(feishu);
+    await feishu.connect();
   }
-
-  // Connect all channels in parallel (non-blocking - channels reconnect in background)
-  Promise.all(channels.map(ch => ch.connect())).catch(err => {
-    logger.warn({ err }, 'Some channels failed to connect initially, will retry');
-  });
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

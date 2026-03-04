@@ -1,0 +1,19 @@
+skill: add-feishu
+version: 1.0.0
+description: "Add Feishu (飞书) as a channel to NanoClaw"
+core_version: 1.1.0
+adds:
+  - src/channels/feishu.ts
+modifies:
+  - src/config.ts
+  - src/index.ts
+structured:
+  npm_dependencies:
+    "@larksuiteoapi/node-sdk": "^1.0.0"
+  env_additions:
+    - FEISHU_APP_ID
+    - FEISHU_APP_SECRET
+    - FEISHU_ADMIN_USER_ID
+conflicts: []
+depends: []
+test: "npm run build"

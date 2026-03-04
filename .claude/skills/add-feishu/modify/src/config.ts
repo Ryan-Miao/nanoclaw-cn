@@ -71,16 +71,9 @@ export const FEISHU_DOC_THRESHOLD = parseInt(
 export const FEISHU_DOC_TITLE = 'NanoClaw 消息文档';
 
 // Feishu configuration check (secrets read directly where needed, not exported here)
-// Cache the env values to avoid re-reading the file
-const feishuEnvConfig = readEnvFile(['FEISHU_APP_ID', 'FEISHU_APP_SECRET']);
 export const hasFeishuConfig = (): boolean => {
   return !!(
-    (process.env.FEISHU_APP_ID || feishuEnvConfig.FEISHU_APP_ID) &&
-    (process.env.FEISHU_APP_SECRET || feishuEnvConfig.FEISHU_APP_SECRET)
+    process.env.FEISHU_APP_ID &&
+    process.env.FEISHU_APP_SECRET
   );
 };
-
-// Disable WhatsApp (use only Feishu)
-export const DISABLE_WHATSAPP =
-  process.env.DISABLE_WHATSAPP === 'true' ||
-  readEnvFile(['DISABLE_WHATSAPP']).DISABLE_WHATSAPP === 'true';

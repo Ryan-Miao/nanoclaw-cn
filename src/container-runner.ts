@@ -204,17 +204,41 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  const secrets = readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  ]);
+
+  // Compatibility: If ANTHROPIC_API_KEY is not set but ANTHROPIC_AUTH_TOKEN is,
+  // copy it to ANTHROPIC_API_KEY for SDK compatibility
+  if (!secrets.ANTHROPIC_API_KEY && secrets.ANTHROPIC_AUTH_TOKEN) {
+    secrets.ANTHROPIC_API_KEY = secrets.ANTHROPIC_AUTH_TOKEN;
+  }
+
+  return secrets;
 }
 
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  secrets: Record<string, string>,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Pass secrets as environment variables (needed for SDK authentication)
+  for (const [key, value] of Object.entries(secrets)) {
+    if (value) {
+      args.push('-e', `${key}=${value}`);
+    }
+  }
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -253,7 +277,8 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const secrets = readSecrets();
+  const containerArgs = buildContainerArgs(mounts, containerName, secrets);
 
   logger.debug(
     {
@@ -293,12 +318,9 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    // Pass secrets via stdin (never written to disk or mounted as files)
-    input.secrets = readSecrets();
+    // Pass input via stdin (secrets are now passed via Docker -e flags)
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
-    // Remove secrets from input so they don't appear in logs
-    delete input.secrets;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
