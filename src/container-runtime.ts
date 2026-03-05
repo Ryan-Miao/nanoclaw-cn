@@ -115,7 +115,11 @@ export function getContainersStatus(): string {
       try {
         const stats = execSync(
           `${CONTAINER_RUNTIME_BIN} stats ${name} --no-stream --format '{{.CPUPerc}} {{.MemUsage}} {{.MemPerc}}'`,
-          { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 10000 },
+          {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            encoding: 'utf-8',
+            timeout: 10000,
+          },
         ).trim();
         const [cpu, mem, memPerc] = stats.split(' ');
         lines.push(`CPU: ${cpu} | 内存: ${mem}`);
@@ -138,16 +142,23 @@ export function getContainersStatus(): string {
         lines.push('进程: 无法获取');
       }
 
-      // Get recent container logs (last 5 lines)
+      // Get recent container logs (last 50 lines)
       try {
         const logs = execSync(
-          `${CONTAINER_RUNTIME_BIN} logs --tail 5 ${name} 2>&1`,
+          `${CONTAINER_RUNTIME_BIN} logs --tail 50 ${name} 2>&1`,
           { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 5000 },
         );
         const logLines = logs.trim().split('\n').filter(Boolean);
         if (logLines.length > 0) {
           lines.push('\n**最近日志**:');
-          lines.push('```\n' + logLines.join('\n') + '\n```');
+          lines.push('```');
+          for (const logLine of logLines) {
+            // Truncate very long lines
+            const truncated =
+              logLine.length > 200 ? logLine.slice(0, 200) + '...' : logLine;
+            lines.push(truncated);
+          }
+          lines.push('```');
         }
       } catch {
         // ignore
