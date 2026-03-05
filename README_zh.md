@@ -49,14 +49,15 @@ claude
 
 ## 功能支持
 
-- **WhatsApp 输入/输出** - 通过手机给 Claude 发消息
+- **多渠道支持** - WhatsApp 和飞书（Feishu/Lark）均可作为输入/输出渠道
+- **图片收发** - 支持在对话中发送和接收图片（飞书）
 - **隔离的群组上下文** - 每个群组都拥有独立的 `CLAUDE.md` 记忆和隔离的文件系统。它们在各自的容器沙箱中运行，且仅挂载所需的文件系统。
 - **主频道** - 您的私有频道（self-chat），用于管理控制；其他所有群组都完全隔离
 - **计划任务** - 运行 Claude 的周期性作业，并可以给您回发消息
 - **网络访问** - 搜索和抓取网页内容
 - **容器隔离** - 智能体在 Apple Container (macOS) 或 Docker (macOS/Linux) 的沙箱中运行
 - **智能体集群（Agent Swarms）** - 启动多个专业智能体团队，协作完成复杂任务（首个支持此功能的个人 AI 助手）
-- **可选集成** - 通过技能添加 Gmail (`/add-gmail`) 等更多功能
+- **可选集成** - 通过技能添加 Gmail (`/add-gmail`)、飞书 (`/add-feishu`) 等更多功能
 
 ## 使用方法
 
@@ -105,6 +106,9 @@ claude
 - `/add-slack` - 添加 Slack
 - `/add-discord` - 添加 Discord
 
+**已实现的渠道**
+- `/add-feishu` - 添加飞书（Feishu/Lark）作为渠道，支持 WebSocket 连接、群组/私聊、图片收发
+
 **平台支持**
 - `/setup-windows` - 通过 WSL2 + Docker 支持 Windows
 
@@ -121,7 +125,7 @@ claude
 ## 架构
 
 ```
-WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) --> 响应
+多渠道 (WhatsApp/飞书) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) --> 响应
 ```
 
 单一 Node.js 进程。智能体在具有挂载目录的隔离 Linux 容器中执行。每个群组的消息队列都带有全局并发控制。通过文件系统进行进程间通信（IPC）。
@@ -129,8 +133,9 @@ WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) -->
 关键文件：
 - `src/index.ts` - 编排器：状态管理、消息循环、智能体调用
 - `src/channels/whatsapp.ts` - WhatsApp 连接、认证、收发消息
+- `src/channels/feishu.ts` - 飞书连接、WebSocket、消息收发、图片处理
 - `src/ipc.ts` - IPC 监听与任务处理
-- `src/router.ts` - 消息格式化与出站路由
+- `src/router.ts` - 消息格式化、出站路由、图片自动处理
 - `src/group-queue.ts` - 各带全局并发限制的群组队列
 - `src/container-runner.ts` - 生成流式智能体容器
 - `src/task-scheduler.ts` - 运行计划任务
@@ -139,9 +144,9 @@ WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) -->
 
 ## FAQ
 
-**为什么是 WhatsApp 而不是 Telegram/Signal 等？**
+**支持哪些通信渠道？**
 
-因为我用 WhatsApp。Fork 这个项目然后运行一个技能来改变它。正是这个项目的核心理念。
+默认支持 WhatsApp。飞书（Feishu/Lark）已通过 `/add-feishu` 技能支持。其他渠道（Telegram、Slack、Discord）可以通过贡献相应的技能来添加。这正是这个项目的核心理念——按需定制。
 
 **为什么是 Docker？**
 
