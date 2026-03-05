@@ -142,10 +142,10 @@ export function getContainersStatus(): string {
         lines.push('进程: 无法获取');
       }
 
-      // Get recent container logs (last 50 lines)
+      // Get recent container logs (last 200 lines with timestamps)
       try {
         const logs = execSync(
-          `${CONTAINER_RUNTIME_BIN} logs --tail 50 ${name} 2>&1`,
+          `${CONTAINER_RUNTIME_BIN} logs --tail 200 --timestamps ${name} 2>&1`,
           { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 5000 },
         );
         const logLines = logs.trim().split('\n').filter(Boolean);
@@ -153,9 +153,9 @@ export function getContainersStatus(): string {
           lines.push('\n**最近日志**:');
           lines.push('```');
           for (const logLine of logLines) {
-            // Truncate very long lines
+            // Truncate very long lines (300 chars)
             const truncated =
-              logLine.length > 200 ? logLine.slice(0, 200) + '...' : logLine;
+              logLine.length > 300 ? logLine.slice(0, 300) + '...' : logLine;
             lines.push(truncated);
           }
           lines.push('```');
