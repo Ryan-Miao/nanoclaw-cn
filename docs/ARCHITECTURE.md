@@ -5,7 +5,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         External Channels                           │
-│                    (WhatsApp / Feishu / Telegram)                   │
+│                    (WhatsApp / 飞书 / Telegram)                     │
 └─────────────────────────────┬───────────────────────────────────────┘
                               │ 消息
                               ▼
@@ -13,7 +13,7 @@
 │                      主进程 (Node.js)                               │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────────┐ │
 │  │ Channel  │  │  Queue   │  │   DB     │  │   IPC Watcher        │ │
-│  │ (WA/FS)  │─▶│ (Group)  │  │ (SQLite) │  │   (消息/任务)         │ │
+│  │ (WA/FS)  │─▶│ (Group)  │  │ (SQLite) │  │   (消息/任务/图片)    │ │
 │  └──────────┘  └────┬─────┘  └──────────┘  └──────────────────────┘ │
 │                     │                                                │
 │                     │  (主进程不加载 Claude，只做调度)                │
@@ -24,7 +24,7 @@
 │                  Docker Container (nanoclaw-agent)                  │
 │  ┌────────────────┐  ┌─────────────┐  ┌─────────────────────────┐   │
 │  │ Claude Agent   │  │ MCP Server  │  │ 挂载目录                │   │
-│  │ SDK            │◀─│ (IPC Tools) │  │ (env/group/data/...)   │   │
+│  │ SDK            │◀─│ (IPC Tools) │  │ (group/ipc/.claude/...) │   │
 │  └────────────────┘  └─────────────┘  └─────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -33,6 +33,7 @@
 - 单 Node.js 进程 + 按需启动的容器
 - 主进程不加载 Claude，只负责调度和路由
 - 容器内运行 Claude Agent SDK，拥有完整能力
+- 多渠道支持：WhatsApp、飞书（通过 Channel 接口抽象）
 
 ---
 
@@ -50,23 +51,18 @@
 ```
 .env (主机)
     │
-    ▼ 主进程启动时过滤
+    ▼ 主进程启动时过滤 (readEnvFile)
 ┌─────────────────────────────────────────────────────────────────┐
-│ data/env/env  (过滤后的安全子集)                                │
-│                                                                 │
-│ 仅包含 Claude 认证相关:                                          │
+│ 仅提取 Claude 认证相关变量:                                      │
 │   - CLAUDE_CODE_OAUTH_TOKEN                                     │
 │   - ANTHROPIC_API_KEY                                           │
 │   - ANTHROPIC_AUTH_TOKEN                                        │
 │   - ANTHROPIC_BASE_URL                                          │
-│   - ANTHROPIC_DEFAULT_*_MODEL (可选映射)                         │
+│   - ANTHROPIC_DEFAULT_*_MODEL                                   │
 └─────────────────────────────────────────────────────────────────┘
     │
-    ▼ 挂载到容器
-/workspace/env-dir/env (只读)
-    │
-    ▼ entrypoint.sh 加载
-export $(cat /workspace/env-dir/env | xargs)
+    ▼ 通过 Docker -e 参数传递
+docker run -e CLAUDE_CODE_OAUTH_TOKEN=xxx -e ANTHROPIC_API_KEY=xxx ...
     │
     ▼
 Claude Agent SDK 获得认证，可正常调用 API
@@ -75,7 +71,7 @@ Claude Agent SDK 获得认证，可正常调用 API
 **安全设计**：
 - 完整 `.env` 不会被挂载（含 Channel 密钥等）
 - 只提取 Claude 需要的变量
-- 容器内只读挂载，防止篡改
+- 通过环境变量传递，不写入容器文件系统
 
 ---
 
@@ -86,19 +82,29 @@ Claude Agent SDK 获得认证，可正常调用 API
 ```
 nanoclaw/
 ├── groups/                    # 配置 ──────▶ GitHub ✅
-│   ├── main/CLAUDE.md
-│   └── global/CLAUDE.md
+│   ├── main/
+│   │   ├── CLAUDE.md         # 主群组记忆
+│   │   ├── logs/             # 容器日志
+│   │   └── images/           # 图片文件
+│   └── global/CLAUDE.md       # 全局共享记忆
 │
 ├── src/                       # 源码 ──────▶ GitHub ✅
+│   ├── channels/
+│   │   ├── whatsapp.ts       # WhatsApp 渠道
+│   │   └── feishu.ts          # 飞书渠道
+│   ├── router.ts              # 消息路由、图片处理
+│   └── ...
 ├── container/                 # 容器定义 ──▶ GitHub ✅
+│   ├── agent-runner/          # Agent 运行时
+│   └── skills/                # 共享技能
 ├── package.json
 │
 ├── data/                      # 运行时数据 ─▶ GitHub ❌ (本地持久化)
-│   ├── workspace/{folder}/   # 工作文件
-│   ├── sessions/{folder}/    # Claude 会话
-│   ├── ipc/{folder}/         # IPC 通信
-│   ├── logs/{folder}/        # 执行日志
-│   └── nanoclaw.db           # SQLite 数据库
+│   ├── sessions/{folder}/     # Claude 会话、设置、技能副本
+│   │   ├── .claude/           # Claude 配置
+│   │   └── agent-runner-src/  # 运行时代码副本
+│   ├── ipc/{folder}/          # IPC 通信
+│   └── nanoclaw.db            # SQLite 数据库
 │
 ├── store/                     # Channel 认证 ─▶ GitHub ❌
 ├── .env                       # 密钥 ────────▶ GitHub ❌
@@ -210,15 +216,33 @@ rsync -avz data/ remote:nanoclaw-data/
 
 ## 5. 容器挂载
 
+### 5.1 主群组 (Main Group)
+
 | 主机路径 | 容器路径 | 权限 | 用途 |
 |---------|---------|------|------|
-| `data/env` | `/workspace/env-dir` | **ro** | Claude 认证 (API Key) |
-| `groups/{folder}` | `/workspace/group` | **ro** | 群组配置 (CLAUDE.md) |
+| `项目根目录` | `/workspace/project` | **ro** | 项目源码（仅限主群组） |
+| `groups/main` | `/workspace/group` | **rw** | 群组配置和工作目录 |
+| `data/sessions/main/.claude` | `/home/node/.claude` | **rw** | Claude 会话、设置、技能 |
+| `data/ipc/main` | `/workspace/ipc` | **rw** | IPC 通信目录 |
+| `data/sessions/main/agent-runner-src` | `/app/src` | **rw** | 运行时代码（可定制） |
+
+### 5.2 普通群组 (Non-Main Groups)
+
+| 主机路径 | 容器路径 | 权限 | 用途 |
+|---------|---------|------|------|
+| `groups/{folder}` | `/workspace/group` | **rw** | 群组配置和工作目录 |
 | `groups/global` | `/workspace/global` | **ro** | 全局共享记忆 |
-| `data/workspace/{folder}` | `/workspace/data` | **rw** | 工作目录，持久化文件 |
 | `data/sessions/{folder}/.claude` | `/home/node/.claude` | **rw** | Claude 会话、设置、技能 |
 | `data/ipc/{folder}` | `/workspace/ipc` | **rw** | IPC 通信目录 |
-| `container/agent-runner/src` | `/app/src` | **ro** | 运行时代码 (绕过缓存) |
+| `data/sessions/{folder}/agent-runner-src` | `/app/src` | **rw** | 运行时代码（可定制） |
+
+### 5.3 设计说明
+
+**群组目录可写**：`/workspace/group` 是读写挂载，Agent 可以在其中创建和修改文件（如生成的图表、报告等）。
+
+**运行时代码可定制**：`agent-runner/src` 首次运行时从 `container/agent-runner/src` 复制到 `data/sessions/{folder}/agent-runner-src`，每个群组可以独立定制 MCP 工具而不影响其他群组。
+
+**额外挂载**：通过 `containerConfig.additionalMounts` 配置，需通过 `~/.config/nanoclaw/mount-allowlist.json` 白名单验证。
 
 ---
 
@@ -278,27 +302,117 @@ rsync -avz data/ remote:nanoclaw-data/
 ## 8. 技能加载
 
 ```
-容器启动时:
+容器启动前 (主进程):
   container/skills/          ──copy──▶  data/sessions/{folder}/.claude/skills/
                                         │
                                         ▼
                                挂载到容器 /home/node/.claude/skills/
                                         │
                                         ▼
+容器启动后:
                                Claude SDK 自动加载 SKILL.md
+```
+
+**设计要点**：
+- 技能从 `container/skills/` 复制到每个群组的 sessions 目录
+- 每个群组拥有独立的技能副本，可以定制
+- 复制发生在每次容器启动前，确保技能更新生效
+
+---
+
+## 9. Channel 抽象
+
+### 9.1 Channel 接口
+
+```typescript
+interface Channel {
+  name: string;
+  connect(): Promise<void>;
+  sendMessage(jid: string, text: string): Promise<void>;
+  sendImage?(jid: string, imagePath: string): Promise<void>;
+  isConnected(): boolean;
+  ownsJid(jid: string): boolean;
+  disconnect(): Promise<void>;
+  setTyping?(jid: string, isTyping: boolean): Promise<void>;
+}
+```
+
+### 9.2 已实现渠道
+
+| 渠道 | JID 格式 | 连接方式 | 特性 |
+|------|---------|---------|------|
+| WhatsApp | `xxx@g.us` / `xxx@s.whatsapp.net` | WebSocket | 打字指示器 |
+| 飞书 | `oc_xxx` (群) / `ou_xxx` (用户) | WebSocket | 图片收发、自动注册 |
+
+### 9.3 消息路由
+
+```
+消息到达 → findChannel(channels, jid) → channel.sendMessage()
+                │
+                ├── WhatsApp: jid.startsWith('@g.us') 或 '@s.whatsapp.net'
+                └── 飞书: jid.startsWith('oc_') 或 'ou_'
 ```
 
 ---
 
-## 9. IPC 通信
+## 10. IPC 通信
 
 容器通过 MCP Tools 与主进程通信：
 
 | Tool | 写入目录 | 主进程处理 |
 |------|---------|-----------|
 | `send_message` | `ipc/{folder}/messages/` | IPC Watcher → Channel |
+| `send_image` | `ipc/{folder}/messages/` | IPC Watcher → Channel.sendImage |
 | `schedule_task` | `ipc/{folder}/tasks/` | IPC Watcher → DB |
 | `pause_task` | `ipc/{folder}/tasks/` | IPC Watcher → DB |
 | `register_group` | `ipc/{folder}/tasks/` | IPC Watcher → 注册 |
 
 **安全隔离**：每个群组只能访问自己的 IPC 目录。
+
+---
+
+## 11. 图片处理
+
+### 10.1 接收图片
+
+```
+用户发送图片 (飞书)
+        │
+        ▼
+FeishuChannel.downloadAndSaveImage()
+        │
+        ▼
+保存到 groups/{folder}/images/downloaded-{hash}.jpg
+        │
+        ▼
+消息内容替换为: [用户发送了图片] 图片路径: /workspace/group/images/xxx.jpg
+        │
+        ▼
+Agent 使用 Read 工具查看图片
+```
+
+### 10.2 发送图片
+
+```
+Agent 生成图片 (markdown 格式)
+        │
+        ▼
+输出: ![描述](https://example.com/chart.png)
+        │
+        ▼
+router.processAndSendImages() 检测 markdown 图片链接
+        │
+        ▼
+downloadImage() 下载到 groups/{folder}/images/
+        │
+        ▼
+channel.sendImage() 上传并发送
+        │
+        ▼
+从文本中移除 markdown 链接
+```
+
+**设计要点**：
+- 自动处理：Agent 无需手动调用 send_image，输出 markdown 图片链接即可
+- 支持所有渠道：飞书已实现 sendImage，其他渠道可扩展
+- 图片持久化：下载的图片保存在群组目录，便于后续引用
