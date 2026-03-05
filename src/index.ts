@@ -22,6 +22,7 @@ import {
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
+  getContainersStatus,
 } from './container-runtime.js';
 import {
   getAllChats,
@@ -394,6 +395,20 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
+          // Check for "status" command - handle directly without agent
+          const statusMessage = groupMessages.find((m) =>
+            m.content.trim().toLowerCase().startsWith('status'),
+          );
+          if (statusMessage) {
+            logger.info({ chatJid }, 'Status command received');
+            const statusReport = getContainersStatus();
+            await channel.sendMessage(chatJid, statusReport);
+            // Update cursor to mark this message as processed
+            lastAgentTimestamp[chatJid] = statusMessage.timestamp;
+            saveState();
+            continue;
+          }
+
           const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
@@ -565,7 +580,8 @@ async function main(): Promise<void> {
     sendImage: (jid, imagePath) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      if (!channel.sendImage) throw new Error(`Channel does not support sendImage: ${channel.name}`);
+      if (!channel.sendImage)
+        throw new Error(`Channel does not support sendImage: ${channel.name}`);
       return channel.sendImage(jid, imagePath);
     },
     registeredGroups: () => registeredGroups,
