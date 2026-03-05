@@ -150,6 +150,16 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Shared Gradle cache directory (persisted across container restarts)
+  // This dramatically speeds up subsequent Android/Kotlin builds
+  const gradleCacheDir = path.join(DATA_DIR, 'gradle-cache');
+  fs.mkdirSync(gradleCacheDir, { recursive: true });
+  mounts.push({
+    hostPath: gradleCacheDir,
+    containerPath: '/home/node/.gradle/caches',
+    readonly: false,
+  });
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
