@@ -63,6 +63,50 @@ server.tool(
 );
 
 server.tool(
+  'send_image',
+  "Send an image to the user or group. IMPORTANT: This is the ONLY way to send images - markdown image links like ![alt](url) will NOT work and will show as plain text.\n\nWhen you generate charts or get image URLs:\n1. Download the image using curl or wget\n2. Save it to /workspace/group/ directory\n3. Use this send_image tool with the local file path\n\nExample workflow:\n- curl -o /workspace/group/chart.png 'https://example.com/chart.png'\n- send_image(image_path='/workspace/group/chart.png')",
+  {
+    image_path: z.string().describe('Path to the image file (absolute path or relative to /workspace/group)'),
+  },
+  async (args) => {
+    // Resolve path - if relative, make it relative to /workspace/group
+    let imagePath = args.image_path;
+    if (!path.isAbsolute(imagePath)) {
+      imagePath = path.join('/workspace/group', imagePath);
+    }
+
+    // Check if file exists
+    if (!fs.existsSync(imagePath)) {
+      return {
+        content: [{ type: 'text' as const, text: `Image file not found: ${imagePath}` }],
+        isError: true,
+      };
+    }
+
+    // Read file to get size
+    const stats = fs.statSync(imagePath);
+    if (stats.size > 20 * 1024 * 1024) {
+      return {
+        content: [{ type: 'text' as const, text: 'Image file too large. Maximum size is 20MB.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'image',
+      chatJid,
+      imagePath,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    const filename = writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Image send requested (${filename}).` }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 

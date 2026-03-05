@@ -41,7 +41,12 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import {
+  findChannel,
+  formatMessages,
+  formatOutbound,
+  processAndSendImages,
+} from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -210,7 +215,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        // Process markdown images: download and send via sendImage
+        const processedText = await processAndSendImages(
+          text,
+          channel,
+          chatJid,
+          group.folder,
+        );
+        // Send remaining text (with image links removed)
+        if (processedText) {
+          await channel.sendMessage(chatJid, processedText);
+        }
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -489,13 +504,17 @@ async function main(): Promise<void> {
   }
 
   // Conditionally create Feishu channel if configured
-  logger.info({ hasFeishu: hasFeishuConfig() }, 'Checking Feishu configuration');
+  logger.info(
+    { hasFeishu: hasFeishuConfig() },
+    'Checking Feishu configuration',
+  );
   if (hasFeishuConfig()) {
     logger.info('Creating Feishu channel');
     feishu = new FeishuChannel({
       ...channelOpts,
       appId: process.env.FEISHU_APP_ID || feishuSecrets.FEISHU_APP_ID!,
-      appSecret: process.env.FEISHU_APP_SECRET || feishuSecrets.FEISHU_APP_SECRET!,
+      appSecret:
+        process.env.FEISHU_APP_SECRET || feishuSecrets.FEISHU_APP_SECRET!,
       onAutoRegister: (chatId: string) => {
         // Auto-register new feishu groups with a generated folder name
         // Feishu groups don't require @ trigger by default
@@ -513,8 +532,11 @@ async function main(): Promise<void> {
   }
 
   // Connect all channels in parallel (non-blocking - channels reconnect in background)
-  Promise.all(channels.map(ch => ch.connect())).catch(err => {
-    logger.warn({ err }, 'Some channels failed to connect initially, will retry');
+  Promise.all(channels.map((ch) => ch.connect())).catch((err) => {
+    logger.warn(
+      { err },
+      'Some channels failed to connect initially, will retry',
+    );
   });
 
   // Start subsystems (independently of connection handler)
@@ -539,6 +561,12 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
+    },
+    sendImage: (jid, imagePath) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (!channel.sendImage) throw new Error(`Channel does not support sendImage: ${channel.name}`);
+      return channel.sendImage(jid, imagePath);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
