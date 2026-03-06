@@ -219,28 +219,39 @@ rsync -avz data/ remote:nanoclaw-data/
 ### 5.1 主群组 (Main Group)
 
 | 主机路径 | 容器路径 | 权限 | 用途 |
-|---------|---------|------|------|
-| `项目根目录` | `/workspace/project` | **ro** | 项目源码（仅限主群组） |
-| `groups/main` | `/workspace/group` | **rw** | 群组配置和工作目录 |
-| `data/sessions/main/.claude` | `/home/node/.claude` | **rw** | Claude 会话、设置、技能 |
-| `data/ipc/main` | `/workspace/ipc` | **rw** | IPC 通信目录 |
-| `data/sessions/main/agent-runner-src` | `/app/src` | **rw** | 运行时代码（可定制） |
+|---------|---------|:----:|------|
+| `项目根目录` | `/workspace/project` | 🔒 | 项目源码（仅限主群组） |
+| `groups/main` | `/workspace/group` | ✏️ | 群组配置和工作目录 |
+| `data/sessions/main/.claude` | `/home/node/.claude` | ✏️ | Claude 会话、设置、技能 |
+| `data/ipc/main` | `/workspace/ipc` | ✏️ | IPC 通信目录 |
+| `data/sessions/main/agent-runner-src` | `/app/src` | ✏️ | 运行时代码（可定制） |
 
 ### 5.2 普通群组 (Non-Main Groups)
 
 | 主机路径 | 容器路径 | 权限 | 用途 |
-|---------|---------|------|------|
-| `groups/{folder}` | `/workspace/group` | **rw** | 群组配置和工作目录 |
-| `groups/global` | `/workspace/global` | **ro** | 全局共享记忆 |
-| `data/sessions/{folder}/.claude` | `/home/node/.claude` | **rw** | Claude 会话、设置、技能 |
-| `data/ipc/{folder}` | `/workspace/ipc` | **rw** | IPC 通信目录 |
-| `data/sessions/{folder}/agent-runner-src` | `/app/src` | **rw** | 运行时代码（可定制） |
+|---------|---------|:----:|------|
+| `groups/{folder}` | `/workspace/group` | ✏️ | 群组配置和工作目录 |
+| `groups/global` | `/workspace/global` | 🔒 | 全局共享记忆 |
+| `data/sessions/{folder}/.claude` | `/home/node/.claude` | ✏️ | Claude 会话、设置、技能 |
+| `data/ipc/{folder}` | `/workspace/ipc` | ✏️ | IPC 通信目录 |
+| `data/sessions/{folder}/agent-runner-src` | `/app/src` | ✏️ | 运行时代码（可定制） |
 
-### 5.3 设计说明
+### 5.3 共享挂载（所有群组）
+
+| 主机路径 | 容器路径 | 权限 | 用途 |
+|---------|---------|:----:|------|
+| `data/gradle-cache` | `/home/node/.gradle/caches` | ✏️ | Gradle 依赖缓存（加速构建） |
+| `~/.ssh` | `/home/node/.ssh` | 🔒 | SSH keys（git 推送） |
+
+### 5.4 设计说明
 
 **群组目录可写**：`/workspace/group` 是读写挂载，Agent 可以在其中创建和修改文件（如生成的图表、报告等）。
 
 **运行时代码可定制**：`agent-runner/src` 首次运行时从 `container/agent-runner/src` 复制到 `data/sessions/{folder}/agent-runner-src`，每个群组可以独立定制 MCP 工具而不影响其他群组。
+
+**Gradle 缓存共享**：所有群组共享 `data/gradle-cache`，首次构建后依赖被缓存，后续构建大幅加速。
+
+**SSH keys 只读**：挂载主机 `~/.ssh` 为只读，Agent 可以推送代码到 GitHub/GitLab，但无法修改密钥。
 
 **额外挂载**：通过 `containerConfig.additionalMounts` 配置，需通过 `~/.config/nanoclaw/mount-allowlist.json` 白名单验证。
 
