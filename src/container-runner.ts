@@ -160,6 +160,17 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Mount SSH keys for git operations (read-only for security)
+  // Allows agent to push to GitHub without generating new keys each time
+  const sshDir = path.join(process.env.HOME || '', '.ssh');
+  if (fs.existsSync(sshDir)) {
+    mounts.push({
+      hostPath: sshDir,
+      containerPath: '/home/node/.ssh',
+      readonly: true,
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
