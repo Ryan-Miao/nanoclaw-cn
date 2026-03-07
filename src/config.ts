@@ -114,7 +114,8 @@ export const MEMORY_FLUSH_THRESHOLD_TOKENS = parseInt(
 // - MEMORY.md: routing index (~50 lines, points to detail files)
 // - memory/YYYY-MM-DD.md: daily log (append-only)
 // - memory/topic.md: detailed topic files (e.g., projects.md, network.md)
-export const MEMORY_FLUSH_PROMPT = process.env.MEMORY_FLUSH_PROMPT ||
+export const MEMORY_FLUSH_PROMPT =
+  process.env.MEMORY_FLUSH_PROMPT ||
   `[SYSTEM] Session nearing compaction. Store durable memories now.
 
 ## What to write where:

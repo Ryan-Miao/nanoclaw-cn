@@ -68,7 +68,12 @@ let messageLoopRunning = false;
 // Cache for token usage info per group (updated on each agent response)
 let tokenUsageCache: Record<
   string,
-  { inputTokens: number; outputTokens: number; contextWindow: number; timestamp: string }
+  {
+    inputTokens: number;
+    outputTokens: number;
+    contextWindow: number;
+    timestamp: string;
+  }
 > = {};
 
 // Read gateway logs and get last request usage for current session
@@ -80,7 +85,14 @@ interface GatewayUsage {
 
 function getGatewayUsage(groupFolder: string): GatewayUsage | null {
   const date = new Date().toISOString().split('T')[0];
-  const logPath = path.join(process.cwd(), 'groups', groupFolder, 'logs', 'api', `api-${date}.jsonl`);
+  const logPath = path.join(
+    process.cwd(),
+    'groups',
+    groupFolder,
+    'logs',
+    'api',
+    `api-${date}.jsonl`,
+  );
 
   if (!fs.existsSync(logPath)) {
     return null;
@@ -92,7 +104,13 @@ function getGatewayUsage(groupFolder: string): GatewayUsage | null {
 
     // Get the last entry with valid usage (no sessionId filter)
     let lastEntry: {
-      response?: { usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number } };
+      response?: {
+        usage?: {
+          input_tokens?: number;
+          output_tokens?: number;
+          cache_read_input_tokens?: number;
+        };
+      };
       timestamp?: string;
     } | null = null;
 
@@ -113,7 +131,8 @@ function getGatewayUsage(groupFolder: string): GatewayUsage | null {
 
     const usage = lastEntry.response?.usage || {};
     return {
-      inputTokens: (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0),
+      inputTokens:
+        (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0),
       outputTokens: usage.output_tokens || 0,
       lastRequest: lastEntry.timestamp || '',
     };
@@ -407,22 +426,20 @@ Reply "done" when finished. This is silent - user won't see the response.`;
 
   let gotResult = false;
   try {
-    await runAgent(
-      group,
-      compactPrompt,
-      chatJid,
-      async (output) => {
-        // When we get a result, close the container
-        if (output.result && !gotResult) {
-          gotResult = true;
-          logger.info({ group: group.name }, 'Compact summary generated');
-          // Close stdin to let container exit
-          queue.closeStdin(chatJid);
-        }
-      },
-    );
+    await runAgent(group, compactPrompt, chatJid, async (output) => {
+      // When we get a result, close the container
+      if (output.result && !gotResult) {
+        gotResult = true;
+        logger.info({ group: group.name }, 'Compact summary generated');
+        // Close stdin to let container exit
+        queue.closeStdin(chatJid);
+      }
+    });
   } catch (err) {
-    logger.warn({ group: group.name, err }, 'Compact summary generation failed, continuing anyway');
+    logger.warn(
+      { group: group.name, err },
+      'Compact summary generation failed, continuing anyway',
+    );
   }
 
   await channel.setTyping?.(chatJid, false);
@@ -431,7 +448,10 @@ Reply "done" when finished. This is silent - user won't see the response.`;
   delete sessions[group.folder];
   setSession(group.folder, '');
   delete tokenUsageCache[group.folder];
-  await channel.sendMessage(chatJid, '✅ 会话已压缩，下次对话将使用新会话（会自动加载之前的摘要）。');
+  await channel.sendMessage(
+    chatJid,
+    '✅ 会话已压缩，下次对话将使用新会话（会自动加载之前的摘要）。',
+  );
 }
 
 async function runAgent(
@@ -598,8 +618,8 @@ async function startMessageLoop(): Promise<void> {
           }
 
           // Check for /status command - handle directly without agent
-          const statusMessage = groupMessages.find((m) =>
-            m.content.trim().toLowerCase() === '/status',
+          const statusMessage = groupMessages.find(
+            (m) => m.content.trim().toLowerCase() === '/status',
           );
           if (statusMessage) {
             logger.info({ chatJid }, 'Status command received');
@@ -612,11 +632,14 @@ async function startMessageLoop(): Promise<void> {
           }
 
           // Check for /new command - start a fresh session
-          const newSessionMessage = groupMessages.find((m) =>
-            m.content.trim().toLowerCase() === '/new',
+          const newSessionMessage = groupMessages.find(
+            (m) => m.content.trim().toLowerCase() === '/new',
           );
           if (newSessionMessage) {
-            logger.info({ chatJid, group: group.name }, '/new command received');
+            logger.info(
+              { chatJid, group: group.name },
+              '/new command received',
+            );
             const hadSession = !!sessions[group.folder];
             delete sessions[group.folder];
             setSession(group.folder, '');
@@ -630,11 +653,14 @@ async function startMessageLoop(): Promise<void> {
           }
 
           // Check for /usage command - show token usage
-          const usageMessage = groupMessages.find((m) =>
-            m.content.trim().toLowerCase() === '/usage',
+          const usageMessage = groupMessages.find(
+            (m) => m.content.trim().toLowerCase() === '/usage',
           );
           if (usageMessage) {
-            logger.info({ chatJid, group: group.name }, '/usage command received');
+            logger.info(
+              { chatJid, group: group.name },
+              '/usage command received',
+            );
             const currentSessionId = sessions[group.folder];
             const sessionStatus = currentSessionId
               ? `活跃 (${currentSessionId.slice(0, 8)}...)`
@@ -646,10 +672,17 @@ async function startMessageLoop(): Promise<void> {
 
             if (gatewayUsage) {
               const remaining = CONTEXT_WINDOW - gatewayUsage.inputTokens;
-              const usedPercent = ((gatewayUsage.inputTokens / CONTEXT_WINDOW) * 100).toFixed(1);
-              const age = Math.round((Date.now() - new Date(gatewayUsage.lastRequest).getTime()) / 60000);
+              const usedPercent = (
+                (gatewayUsage.inputTokens / CONTEXT_WINDOW) *
+                100
+              ).toFixed(1);
+              const age = Math.round(
+                (Date.now() - new Date(gatewayUsage.lastRequest).getTime()) /
+                  60000,
+              );
 
-              response = `📊 **会话 Token 使用情况**\n\n` +
+              response =
+                `📊 **会话 Token 使用情况**\n\n` +
                 `- 上下文: ${gatewayUsage.inputTokens.toLocaleString()} / ${CONTEXT_WINDOW.toLocaleString()} (${usedPercent}%)\n` +
                 `- 剩余: ${remaining.toLocaleString()} tokens\n` +
                 `- 会话: ${sessionStatus}\n` +
@@ -664,11 +697,14 @@ async function startMessageLoop(): Promise<void> {
           }
 
           // Check for /help command - show available commands
-          const helpMessage = groupMessages.find((m) =>
-            m.content.trim().toLowerCase() === '/help',
+          const helpMessage = groupMessages.find(
+            (m) => m.content.trim().toLowerCase() === '/help',
           );
           if (helpMessage) {
-            logger.info({ chatJid, group: group.name }, '/help command received');
+            logger.info(
+              { chatJid, group: group.name },
+              '/help command received',
+            );
             const response = `📖 **可用命令**
 
 • /status - 查看容器运行状态
@@ -687,11 +723,14 @@ async function startMessageLoop(): Promise<void> {
           }
 
           // Check for /compact command - generate summary and clear session
-          const compactMessage = groupMessages.find((m) =>
-            m.content.trim().toLowerCase() === '/compact',
+          const compactMessage = groupMessages.find(
+            (m) => m.content.trim().toLowerCase() === '/compact',
           );
           if (compactMessage) {
-            logger.info({ chatJid, group: group.name }, '/compact command received');
+            logger.info(
+              { chatJid, group: group.name },
+              '/compact command received',
+            );
             await doCompact(group, chatJid, channel);
             lastAgentTimestamp[chatJid] = compactMessage.timestamp;
             saveState();

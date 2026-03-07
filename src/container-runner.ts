@@ -40,9 +40,9 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
-  compactThresholdTokens?: number;  // Trigger compact when remaining tokens < threshold
-  memoryFlushThresholdTokens?: number;  // Trigger memory flush when remaining < threshold
-  memoryFlushPrompt?: string;  // Custom prompt for memory flush
+  compactThresholdTokens?: number; // Trigger compact when remaining tokens < threshold
+  memoryFlushThresholdTokens?: number; // Trigger memory flush when remaining < threshold
+  memoryFlushPrompt?: string; // Custom prompt for memory flush
 }
 
 export interface ContainerOutput {
@@ -51,9 +51,9 @@ export interface ContainerOutput {
   newSessionId?: string;
   error?: string;
   // Context management signals
-  needsCompact?: boolean;      // True when context threshold reached
-  compactSummary?: string;     // Summary to inject into new session
-  remainingTokens?: number;    // Tokens remaining before threshold
+  needsCompact?: boolean; // True when context threshold reached
+  compactSummary?: string; // Summary to inject into new session
+  remainingTokens?: number; // Tokens remaining before threshold
   // Token usage info (for /usage command)
   tokenUsage?: {
     inputTokens: number;
