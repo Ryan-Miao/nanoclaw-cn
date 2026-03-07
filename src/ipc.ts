@@ -105,7 +105,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 ) {
                   await deps.sendImage(data.chatJid, data.imagePath);
                   logger.info(
-                    { chatJid: data.chatJid, imagePath: data.imagePath, sourceGroup },
+                    {
+                      chatJid: data.chatJid,
+                      imagePath: data.imagePath,
+                      sourceGroup,
+                    },
                     'IPC image sent',
                   );
                 } else {

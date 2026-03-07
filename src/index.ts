@@ -3,9 +3,12 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  COMPACT_THRESHOLD_TOKENS,
   DISABLE_WHATSAPP,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
+  MEMORY_FLUSH_PROMPT,
+  MEMORY_FLUSH_THRESHOLD_TOKENS,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
   hasFeishuConfig,
@@ -60,6 +63,70 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+
+// Cache for token usage info per group (updated on each agent response)
+let tokenUsageCache: Record<
+  string,
+  { inputTokens: number; outputTokens: number; contextWindow: number; timestamp: string }
+> = {};
+
+// Read gateway logs and aggregate usage for a group
+interface GatewayUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  requestCount: number;
+  lastRequest: string;
+}
+
+function getGatewayUsage(groupFolder: string): GatewayUsage | null {
+  const date = new Date().toISOString().split('T')[0];
+  const logPath = path.join(process.cwd(), 'groups', groupFolder, 'logs', 'api', `api-${date}.jsonl`);
+
+  if (!fs.existsSync(logPath)) {
+    return null;
+  }
+
+  try {
+    const content = fs.readFileSync(logPath, 'utf-8');
+    const lines = content.trim().split('\n').filter(Boolean);
+
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let cacheReadTokens = 0;
+    let cacheCreationTokens = 0;
+    let lastRequest = '';
+
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        const usage = entry.response?.usage || {};
+        inputTokens += usage.input_tokens || 0;
+        outputTokens += usage.output_tokens || 0;
+        cacheReadTokens += usage.cache_read_input_tokens || 0;
+        cacheCreationTokens += usage.cache_creation_input_tokens || 0;
+        if (entry.timestamp) {
+          lastRequest = entry.timestamp;
+        }
+      } catch {
+        // Skip malformed lines
+      }
+    }
+
+    return {
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      cacheCreationTokens,
+      requestCount: lines.length,
+      lastRequest,
+    };
+  } catch (err) {
+    logger.error({ err, logPath }, 'Failed to read gateway log');
+    return null;
+  }
+}
 
 let whatsapp: WhatsAppChannel;
 let feishu: FeishuChannel | undefined;
@@ -309,6 +376,27 @@ async function runAgent(
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
+        // Update token usage cache
+        if (output.tokenUsage) {
+          logger.info(
+            { group: group.name, tokenUsage: output.tokenUsage },
+            'Token usage received',
+          );
+          tokenUsageCache[group.folder] = {
+            ...output.tokenUsage,
+            timestamp: new Date().toISOString(),
+          };
+        }
+        // Handle compact signal from container
+        if (output.needsCompact) {
+          logger.info(
+            { group: group.name, remaining: output.remainingTokens },
+            'Context threshold reached, session will compact on next run',
+          );
+          // Clear session to start fresh next time
+          delete sessions[group.folder];
+          setSession(group.folder, '');
+        }
         await onOutput(output);
       }
     : undefined;
@@ -323,15 +411,30 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        compactThresholdTokens: COMPACT_THRESHOLD_TOKENS,
+        memoryFlushThresholdTokens: MEMORY_FLUSH_THRESHOLD_TOKENS,
+        memoryFlushPrompt: MEMORY_FLUSH_PROMPT,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
+    // Only update session if not compacting (wrappedOnOutput already handled compact case)
+    if (output.newSessionId && !output.needsCompact) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
+    }
+
+    // Handle compact signal from container
+    if (output.needsCompact) {
+      logger.info(
+        { group: group.name, summary: output.compactSummary?.slice(0, 100) },
+        'Context threshold reached, clearing session for compact',
+      );
+      // Clear session to start fresh next time
+      delete sessions[group.folder];
+      setSession(group.folder, '');
     }
 
     if (output.status === 'error') {
@@ -395,9 +498,9 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
-          // Check for "status" command - handle directly without agent
+          // Check for /status command - handle directly without agent
           const statusMessage = groupMessages.find((m) =>
-            m.content.trim().toLowerCase().startsWith('status'),
+            m.content.trim().toLowerCase() === '/status',
           );
           if (statusMessage) {
             logger.info({ chatJid }, 'Status command received');
@@ -405,6 +508,180 @@ async function startMessageLoop(): Promise<void> {
             await channel.sendMessage(chatJid, statusReport);
             // Update cursor to mark this message as processed
             lastAgentTimestamp[chatJid] = statusMessage.timestamp;
+            saveState();
+            continue;
+          }
+
+          // Check for /new command - start a fresh session
+          const newSessionMessage = groupMessages.find((m) =>
+            m.content.trim().toLowerCase() === '/new',
+          );
+          if (newSessionMessage) {
+            logger.info({ chatJid, group: group.name }, '/new command received');
+            const hadSession = !!sessions[group.folder];
+            delete sessions[group.folder];
+            setSession(group.folder, '');
+            const response = hadSession
+              ? '✅ 已创建新会话，下次对话将重新开始。'
+              : 'ℹ️ 当前没有活跃会话，本来就是新会话。';
+            await channel.sendMessage(chatJid, response);
+            lastAgentTimestamp[chatJid] = newSessionMessage.timestamp;
+            saveState();
+            continue;
+          }
+
+          // Check for /usage command - show token usage
+          const usageMessage = groupMessages.find((m) =>
+            m.content.trim().toLowerCase() === '/usage',
+          );
+          if (usageMessage) {
+            logger.info({ chatJid, group: group.name }, '/usage command received');
+            const currentSessionId = sessions[group.folder];
+            const sessionStatus = currentSessionId
+              ? `活跃 (${currentSessionId.slice(0, 8)}...)`
+              : '新会话';
+
+            // Get usage from gateway logs (accurate daily total)
+            const gatewayUsage = getGatewayUsage(group.folder);
+            // Get context window info from SDK (current session)
+            const sdkUsage = tokenUsageCache[group.folder];
+            let response: string;
+
+            if (gatewayUsage && gatewayUsage.requestCount > 0) {
+              const totalTokens = gatewayUsage.inputTokens + gatewayUsage.outputTokens;
+              const age = Math.round((Date.now() - new Date(gatewayUsage.lastRequest).getTime()) / 60000);
+
+              let contextInfo = '';
+              if (sdkUsage) {
+                const remaining = sdkUsage.contextWindow - sdkUsage.inputTokens;
+                const usedPercent = ((sdkUsage.inputTokens / sdkUsage.contextWindow) * 100).toFixed(1);
+                contextInfo = `\n- 上下文: ${sdkUsage.inputTokens.toLocaleString()} / ${sdkUsage.contextWindow.toLocaleString()} (${usedPercent}%)\n` +
+                  `- 剩余: ${remaining.toLocaleString()} tokens`;
+              }
+
+              response = `📊 **今日 Token 使用情况**\n\n` +
+                `- 输入: ${gatewayUsage.inputTokens.toLocaleString()} tokens\n` +
+                `- 输出: ${gatewayUsage.outputTokens.toLocaleString()} tokens\n` +
+                `- 缓存命中: ${gatewayUsage.cacheReadTokens.toLocaleString()} tokens\n` +
+                `- 缓存创建: ${gatewayUsage.cacheCreationTokens.toLocaleString()} tokens\n` +
+                `- 总计: ${totalTokens.toLocaleString()} tokens\n` +
+                `- 请求数: ${gatewayUsage.requestCount}${contextInfo}\n` +
+                `- 会话: ${sessionStatus}\n` +
+                `- 更新: ${age} 分钟前`;
+            } else {
+              response = `📊 暂无今日 token 使用数据，请先发送一条消息。\n\n- 会话: ${sessionStatus}`;
+            }
+            await channel.sendMessage(chatJid, response);
+            lastAgentTimestamp[chatJid] = usageMessage.timestamp;
+            saveState();
+            continue;
+          }
+
+          // Check for /help command - show available commands
+          const helpMessage = groupMessages.find((m) =>
+            m.content.trim().toLowerCase() === '/help',
+          );
+          if (helpMessage) {
+            logger.info({ chatJid, group: group.name }, '/help command received');
+            const response = `📖 **可用命令**
+
+• /status - 查看容器运行状态
+• /new - 创建新会话（清除当前会话）
+• /usage - 查看 token 使用情况
+• /compact - 压缩会话（生成摘要并创建新会话）
+• /help - 显示此帮助信息
+
+💡 提示：
+- 普通消息需要以触发词开头（如 @Andy）
+- 主频道无需触发词，所有消息都会被处理`;
+            await channel.sendMessage(chatJid, response);
+            lastAgentTimestamp[chatJid] = helpMessage.timestamp;
+            saveState();
+            continue;
+          }
+
+          // Check for /compact command - generate summary and clear session
+          const compactMessage = groupMessages.find((m) =>
+            m.content.trim().toLowerCase() === '/compact',
+          );
+          if (compactMessage) {
+            logger.info({ chatJid, group: group.name }, '/compact command received');
+            const hadSession = !!sessions[group.folder];
+            if (hadSession) {
+              // First, ask the agent to generate summary and memory files
+              await channel.sendMessage(chatJid, '📝 正在生成会话摘要和记忆文件...');
+              await channel.setTyping?.(chatJid, true);
+
+              const compactPrompt = `[SYSTEM] User requested session compact. Generate summary and memory files for the next session.
+
+## Task 1: Generate Compact Summary
+Use the Write tool to save to: /workspace/group/.nanoclaw/compact-summary.md
+
+Format:
+# Session Summary - ${new Date().toISOString().split('T')[0]}
+
+## Current Task
+(What were we doing?)
+
+## Key Decisions
+- (Important decisions made)
+
+## Pending Actions
+- (What's left to do)
+
+## Important Context
+(Any other context needed for continuation)
+
+Keep it SHORT - max 50 lines.
+
+## Task 2: Update Memory Files
+1. **MEMORY.md** (Routing Index - keep under 50 lines)
+   - Point to detailed files, don't dump knowledge here
+   - Only add NEW stable info: preferences, key decisions
+
+2. **memory/${new Date().toISOString().split('T')[0]}.md** (Today's Log - append-only)
+   - What we did today
+   - Key outcomes
+   - Pending items
+
+Rules:
+1. READ existing files first - don't duplicate
+2. Be CONCISE - bullet points, not paragraphs
+3. Skip if nothing new to store
+
+Reply "done" when finished. This is silent - user won't see the response.`;
+
+              let gotResult = false;
+              try {
+                await runAgent(
+                  group,
+                  compactPrompt,
+                  chatJid,
+                  async (output) => {
+                    // When we get a result, close the container
+                    if (output.result && !gotResult) {
+                      gotResult = true;
+                      logger.info({ group: group.name }, 'Compact summary generated');
+                      // Close stdin to let container exit
+                      queue.closeStdin(chatJid);
+                    }
+                  },
+                );
+              } catch (err) {
+                logger.warn({ group: group.name, err }, 'Compact summary generation failed, continuing anyway');
+              }
+
+              await channel.setTyping?.(chatJid, false);
+
+              // Now clear the session
+              delete sessions[group.folder];
+              setSession(group.folder, '');
+              delete tokenUsageCache[group.folder];
+              await channel.sendMessage(chatJid, '✅ 会话已压缩，下次对话将使用新会话（会自动加载之前的摘要）。');
+            } else {
+              await channel.sendMessage(chatJid, 'ℹ️ 当前没有活跃会话，无需压缩。');
+            }
+            lastAgentTimestamp[chatJid] = compactMessage.timestamp;
             saveState();
             continue;
           }

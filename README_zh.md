@@ -57,6 +57,7 @@ claude
 - **网络访问** - 搜索和抓取网页内容
 - **容器隔离** - 智能体在 Apple Container (macOS) 或 Docker (macOS/Linux) 的沙箱中运行
 - **智能体集群（Agent Swarms）** - 启动多个专业智能体团队，协作完成复杂任务（首个支持此功能的个人 AI 助手）
+- **上下文管理** - 自动管理长对话的上下文窗口：Memory Flush（自动写入记忆）+ Auto Compact（自动压缩会话），支持 200K context 模型如 GLM-5
 - **可选集成** - 通过技能添加 Gmail (`/add-gmail`)、飞书 (`/add-feishu`) 等更多功能
 
 ## 使用方法

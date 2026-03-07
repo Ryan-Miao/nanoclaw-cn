@@ -108,7 +108,14 @@ export class FeishuChannel implements Channel {
       }
 
       // Debug: log message type and structure
-      logger.info({ chatId, messageType: message.message_type, content: message.content?.slice?.(0, 100) }, 'Received Feishu message type');
+      logger.info(
+        {
+          chatId,
+          messageType: message.message_type,
+          content: message.content?.slice?.(0, 100),
+        },
+        'Received Feishu message type',
+      );
 
       // Parse message content
       let content = '';
@@ -121,7 +128,10 @@ export class FeishuChannel implements Channel {
         }
       } else if (message.message_type === 'image') {
         // Handle image messages
-        logger.info({ chatId, content: message.content }, 'Processing Feishu image message');
+        logger.info(
+          { chatId, content: message.content },
+          'Processing Feishu image message',
+        );
         try {
           const contentObj = JSON.parse(message.content);
           // Feishu image message has image_key, not file_key
@@ -134,9 +144,15 @@ export class FeishuChannel implements Channel {
               message.message_id,
             );
             content = `[用户发送了图片]\n图片路径: ${imagePath}\n请用 Read 工具查看图片内容。`;
-            logger.info({ chatId, imageKey, imagePath }, 'Received and saved Feishu image');
+            logger.info(
+              { chatId, imageKey, imagePath },
+              'Received and saved Feishu image',
+            );
           } else {
-            logger.warn({ chatId, contentObj }, 'No image_key found in image message');
+            logger.warn(
+              { chatId, contentObj },
+              'No image_key found in image message',
+            );
             content = '[用户发送了图片，但无法获取图片key]';
           }
         } catch (err) {
@@ -236,7 +252,10 @@ export class FeishuChannel implements Channel {
    */
   async sendImage(chatId: string, imagePath: string): Promise<void> {
     if (!this.connected) {
-      logger.warn({ chatId, imagePath }, 'Feishu disconnected, cannot send image');
+      logger.warn(
+        { chatId, imagePath },
+        'Feishu disconnected, cannot send image',
+      );
       return;
     }
 
@@ -245,7 +264,10 @@ export class FeishuChannel implements Channel {
       const imageBuffer = fs.readFileSync(imagePath);
 
       // Upload image to Feishu
-      logger.info({ chatId, imagePath, size: imageBuffer.length }, 'Uploading image to Feishu');
+      logger.info(
+        { chatId, imagePath, size: imageBuffer.length },
+        'Uploading image to Feishu',
+      );
 
       const uploadResp = await this.client.im.image.create({
         data: {
@@ -257,7 +279,9 @@ export class FeishuChannel implements Channel {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const uploadRespAny = uploadResp as any;
       if (uploadRespAny.code !== undefined && uploadRespAny.code !== 0) {
-        throw new Error(`Failed to upload image: code=${uploadRespAny.code}, msg=${uploadRespAny.msg}`);
+        throw new Error(
+          `Failed to upload image: code=${uploadRespAny.code}, msg=${uploadRespAny.msg}`,
+        );
       }
 
       const imageKey = uploadRespAny.image_key ?? uploadRespAny.data?.image_key;
@@ -280,12 +304,17 @@ export class FeishuChannel implements Channel {
       });
 
       if (resp.code !== 0) {
-        throw new Error(`Failed to send image message: code=${resp.code}, msg=${resp.msg}`);
+        throw new Error(
+          `Failed to send image message: code=${resp.code}, msg=${resp.msg}`,
+        );
       }
 
       logger.info({ chatId, imageKey }, 'Image sent to Feishu');
     } catch (err) {
-      logger.error({ err, chatId, imagePath }, 'Failed to send image to Feishu');
+      logger.error(
+        { err, chatId, imagePath },
+        'Failed to send image to Feishu',
+      );
       throw err;
     }
   }
@@ -348,7 +377,9 @@ export class FeishuChannel implements Channel {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const respAny = resp as any;
     if (respAny.code !== undefined && respAny.code !== 0) {
-      throw new Error(`Failed to download image: code=${respAny.code}, msg=${respAny.msg}`);
+      throw new Error(
+        `Failed to download image: code=${respAny.code}, msg=${respAny.msg}`,
+      );
     }
 
     if (Buffer.isBuffer(resp)) {
@@ -390,14 +421,20 @@ export class FeishuChannel implements Channel {
     else if (contentType.includes('webp')) ext = '.webp';
 
     // Generate filename with timestamp and message id
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[:.]/g, '-')
+      .slice(0, 19);
     const fileName = `${timestamp}_${messageId.slice(-8)}${ext}`;
     const filePath = path.join(imagesDir, fileName);
 
     // Write image data to file
     fs.writeFileSync(filePath, buffer);
 
-    logger.info({ imageKey, filePath, size: buffer.length }, 'Image saved to group folder');
+    logger.info(
+      { imageKey, filePath, size: buffer.length },
+      'Image saved to group folder',
+    );
 
     // Return path relative to container mount (/workspace/group)
     return `images/${fileName}`;

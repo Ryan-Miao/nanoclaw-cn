@@ -427,3 +427,192 @@ channel.sendImage() 上传并发送
 - 自动处理：Agent 无需手动调用 send_image，输出 markdown 图片链接即可
 - 支持所有渠道：飞书已实现 sendImage，其他渠道可扩展
 - 图片持久化：下载的图片保存在群组目录，便于后续引用
+
+---
+
+## 12. 上下文管理
+
+### 12.1 问题背景
+
+GLM-5 等 200K context 模型在长期对话中会耗尽上下文窗口，导致 API 错误：
+```
+API Error: The model has reached its context window limit.
+```
+
+### 12.2 三层防御机制
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Layer 1: Memory Flush (60K threshold)                              │
+│  接近 compact 阈值时，触发静默 turn 让模型写入记忆                    │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│  Layer 2: Auto Compact (50K threshold)                              │
+│  当剩余 tokens < 阈值时，结束当前会话，下次启动新会话                 │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│  Layer 3: Persistent Memory (文件系统)                              │
+│  - MEMORY.md: 永久记忆（决策、偏好、关键信息）                       │
+│  - memory/YYYY-MM-DD.md: 每日日志（append-only）                     │
+│  新会话自动加载这些文件作为上下文                                    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 12.3 Memory Flush + Compact Summary 流程
+
+```
+Agent 返回 result 消息
+        │
+        ├── 检查 usage.contextWindow - usage.inputTokens
+        │
+        ├── 如果 remaining < MEMORY_FLUSH_THRESHOLD (60K)
+        │       │
+        │       ▼
+        │   注入静默 prompt:
+        │   "[SYSTEM] Context approaching limit.
+        │    Write important info to MEMORY.md or memory/YYYY-MM-DD.md.
+        │    Reply with NO_REPLY if nothing to store."
+        │       │
+        │       ▼
+        │   模型写入记忆文件
+        │       │
+        │       ▼
+        │   继续处理后续消息
+        │
+        └── 如果 remaining < COMPACT_THRESHOLD (50K)
+                │
+                ▼
+            生成 Compact Summary:
+            "[SYSTEM] Session about to compact.
+             Write summary to .nanoclaw/compact-summary.md"
+                │
+                ▼
+            模型写入 summary 文件
+                │
+                ▼
+            返回 needsCompact: true
+                │
+                ▼
+            主进程清除 sessionId
+                │
+                ▼
+            下次启动新会话时:
+            读取 .nanoclaw/compact-summary.md
+            注入为上下文 "[CONTEXT FROM PREVIOUS SESSION]"
+```
+
+### 12.4 Compact Summary 文件
+
+位置：`groups/{folder}/.nanoclaw/compact-summary.md`
+
+```markdown
+# Session Summary - 2026-03-06
+
+## Current Task
+- Working on Android app build optimization
+- Gradle cache mount added, testing speed improvements
+
+## Key Decisions
+- Use Apple Container on macOS, Docker on Linux
+- Memory flush threshold: 60K tokens
+- Compact threshold: 50K tokens
+
+## Pending Actions
+- [ ] Test build performance after cache warmup
+- [ ] Update documentation with new mount config
+
+## Important Context
+- User prefers concise responses in Chinese
+- Main channel is self-chat for admin control
+```
+
+### 12.4 配置项
+
+| 环境变量 | 默认值 | 说明 |
+|---------|-------|------|
+| `COMPACT_THRESHOLD_TOKENS` | 50000 | 剩余 tokens < 此值时触发 compact |
+| `MEMORY_FLUSH_THRESHOLD_TOKENS` | 60000 | 剩余 tokens < 此值时触发 memory flush |
+| `MEMORY_FLUSH_PROMPT` | (内置) | 自定义 memory flush 提示 |
+
+**配置原则**：
+- `MEMORY_FLUSH_THRESHOLD` > `COMPACT_THRESHOLD`（让 flush 先触发）
+- 两者差值约 10K，给 flush 留出足够空间
+- 设为 0 可禁用对应功能
+
+### 12.5 记忆文件结构
+
+```
+groups/{folder}/
+├── MEMORY.md                    # 永久记忆（手动/自动维护）
+│   - 用户偏好
+│   - 重要决策
+│   - 关键项目信息
+│
+├── memory/                      # 每日日志目录
+│   ├── 2026-03-06.md           # 当天日志 (append-only)
+│   ├── 2026-03-07.md
+│   └── ...
+│
+├── CLAUDE.md                    # Agent 行为规则（手动编辑）
+│
+└── conversations/               # 历史对话归档
+    ├── 2026-03-06-conversation-xxx.md
+    └── ...
+```
+
+### 12.7 数据流
+
+**Container → Host**:
+```typescript
+interface ContainerOutput {
+  status: 'success' | 'error';
+  result: string | null;
+  newSessionId?: string;
+  needsCompact?: boolean;        // 触发 compact 信号
+  remainingTokens?: number;      // 剩余 tokens
+}
+```
+
+**Host 处理**:
+```typescript
+// src/index.ts
+if (output.needsCompact) {
+  logger.info('Context threshold reached, clearing session');
+  delete sessions[group.folder];
+  setSession(group.folder, '');
+  // Summary is already saved by container in .nanoclaw/compact-summary.md
+}
+```
+
+**Container 内部 - Memory Flush**:
+```typescript
+// container/agent-runner/src/index.ts
+if (remainingTokens < memoryFlushThreshold && !memoryFlushed) {
+  await runQuery(flushPrompt, ...);  // 写入 MEMORY.md + memory/YYYY-MM-DD.md
+  memoryFlushed = true;
+}
+```
+
+**Container 内部 - Compact Summary**:
+```typescript
+// 生成 compact summary
+if (needsCompact) {
+  await runQuery(summaryPrompt, ...);  // 写入 .nanoclaw/compact-summary.md
+  writeOutput({ needsCompact: true, remainingTokens });
+  break;
+}
+```
+
+**新 Session 启动**:
+```typescript
+// 读取 compact summary 并注入
+if (!sessionId) {
+  const summaryPath = path.join('/workspace/group', '.nanoclaw/compact-summary.md');
+  if (fs.existsSync(summaryPath)) {
+    const summary = fs.readFileSync(summaryPath, 'utf-8');
+    prompt = `[CONTEXT FROM PREVIOUS SESSION]\n${summary}\n\n[NEW MESSAGE]\n${prompt}`;
+  }
+}
+```

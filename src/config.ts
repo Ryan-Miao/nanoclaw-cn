@@ -84,3 +84,47 @@ export const hasFeishuConfig = (): boolean => {
 export const DISABLE_WHATSAPP =
   process.env.DISABLE_WHATSAPP === 'true' ||
   readEnvFile(['DISABLE_WHATSAPP']).DISABLE_WHATSAPP === 'true';
+
+// Context management: trigger compact when remaining tokens < threshold
+// Default 50K for 200K context models (like GLM-5)
+// Set to 0 to disable automatic compact
+export const COMPACT_THRESHOLD_TOKENS = parseInt(
+  process.env.COMPACT_THRESHOLD_TOKENS || '50000',
+  10,
+);
+
+// Memory flush: trigger silent turn to write memories before compact
+// Should be higher than COMPACT_THRESHOLD_TOKENS to flush first
+// Default 60K (10K buffer before compact)
+// Set to 0 to disable memory flush
+export const MEMORY_FLUSH_THRESHOLD_TOKENS = parseInt(
+  process.env.MEMORY_FLUSH_THRESHOLD_TOKENS || '60000',
+  10,
+);
+
+// Memory flush prompt - sent silently to trigger memory writing
+// Uses OpenClaw-style dual memory structure:
+// - MEMORY.md: routing index (~50 lines, points to detail files)
+// - memory/YYYY-MM-DD.md: daily log (append-only)
+// - memory/topic.md: detailed topic files (e.g., projects.md, network.md)
+export const MEMORY_FLUSH_PROMPT = process.env.MEMORY_FLUSH_PROMPT ||
+  `[SYSTEM] Session nearing compaction. Store durable memories now.
+
+## What to write where:
+
+**MEMORY.md** (Routing Index - keep under 50 lines)
+- Point to detailed files, don't dump knowledge here
+- Example: "See memory/projects.md for project details"
+- Only add NEW stable info: preferences, key decisions
+
+**memory/YYYY-MM-DD.md** (Today's Log - append-only)
+- What we did today
+- Key outcomes
+- Pending items
+
+## Rules:
+1. READ existing files first - don't duplicate
+2. Be CONCISE - bullet points, not paragraphs
+3. Reply with NO_REPLY if nothing new to store
+
+This is silent - user won't see it.`;

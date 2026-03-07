@@ -28,6 +28,9 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+  compactThresholdTokens?: number;  // Trigger compact when remaining tokens < threshold
+  memoryFlushThresholdTokens?: number;  // Trigger memory flush when remaining < threshold
+  memoryFlushPrompt?: string;  // Custom prompt for memory flush
 }
 
 interface ContainerOutput {
@@ -35,7 +38,20 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  // Context management signals
+  needsCompact?: boolean;           // True when context threshold reached
+  compactSummary?: string;          // Summary to inject into new session
+  remainingTokens?: number;         // Tokens remaining before threshold
+  // Token usage info (for /usage command)
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    contextWindow: number;
+  };
 }
+
+// Compact summary file path (relative to group folder)
+const COMPACT_SUMMARY_FILE = '.nanoclaw/compact-summary.md';
 
 interface SessionEntry {
   sessionId: string;
@@ -361,7 +377,14 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{
+  newSessionId?: string;
+  lastAssistantUuid?: string;
+  closedDuringQuery: boolean;
+  needsCompact?: boolean;
+  remainingTokens?: number;
+  tokenUsage?: { inputTokens: number; outputTokens: number; contextWindow: number };
+}> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -390,6 +413,9 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  let needsCompact = false;
+  let remainingTokens: number | undefined;
+  let tokenUsage: { inputTokens: number; outputTokens: number; contextWindow: number } | undefined;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -476,18 +502,48 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+
+      // Debug: log full message to see what SDK returns
+      log(`Result message keys: ${Object.keys(message).join(', ')}`);
+
+      // Track token usage for context management
+      // SDK returns snake_case field names: input_tokens, output_tokens
+      // Note: input_tokens is the TOTAL input tokens, cache_read/cache_creation are subsets of it
+      // See: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
+      const usage = (message as { usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } }).usage;
+
+      // Debug: log full usage data
+      log(`Usage data: ${JSON.stringify(usage)}`);
+
+      const inputTokens = usage?.input_tokens || 0;  // Total input tokens (already includes cache tokens)
+      const outputTokens = usage?.output_tokens || 0;
+      // Context window is typically 200K for most models
+      const contextWindow = 200000;
+      remainingTokens = contextWindow - inputTokens;
+
+      // Store token usage for /usage command
+      tokenUsage = { inputTokens, outputTokens, contextWindow };
+
+      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''} tokens=${inputTokens}/${contextWindow} remaining=${remainingTokens}`);
+
+      // Check if we need to trigger compact
+      const threshold = containerInput.compactThresholdTokens || 0;
+      needsCompact = threshold > 0 && remainingTokens < threshold;
+
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId
+        newSessionId,
+        needsCompact,
+        remainingTokens,
+        tokenUsage,
       });
     }
   }
 
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, needsCompact, remainingTokens, tokenUsage };
 }
 
 async function main(): Promise<void> {
@@ -526,6 +582,45 @@ async function main(): Promise<void> {
 
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
+
+  // If starting fresh (no sessionId), inject context from previous sessions
+  if (!sessionId) {
+    const contextParts: string[] = [];
+
+    // Load MEMORY.md (routing index to long-term memories)
+    const memoryPath = path.join('/workspace/group', 'MEMORY.md');
+    if (fs.existsSync(memoryPath)) {
+      try {
+        const memory = fs.readFileSync(memoryPath, 'utf-8').trim();
+        if (memory) {
+          log(`Injecting MEMORY.md from previous sessions`);
+          contextParts.push(`[LONG-TERM MEMORY - Routing Index]\n${memory}`);
+        }
+      } catch (err) {
+        log(`Failed to read MEMORY.md: ${err}`);
+      }
+    }
+
+    // Load compact summary from previous session
+    const compactSummaryPath = path.join('/workspace/group', COMPACT_SUMMARY_FILE);
+    if (fs.existsSync(compactSummaryPath)) {
+      try {
+        const summary = fs.readFileSync(compactSummaryPath, 'utf-8').trim();
+        if (summary) {
+          log(`Injecting compact summary from previous session`);
+          contextParts.push(`[CONTEXT FROM PREVIOUS SESSION]\n${summary}`);
+        }
+      } catch (err) {
+        log(`Failed to read compact summary: ${err}`);
+      }
+    }
+
+    // Prepend all context to the prompt
+    if (contextParts.length > 0) {
+      prompt = `${contextParts.join('\n\n')}\n\n[NEW MESSAGE]\n${prompt}`;
+    }
+  }
+
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
@@ -537,6 +632,8 @@ async function main(): Promise<void> {
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+  let memoryFlushed = false;  // Track if we've flushed memory this session
+
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
@@ -547,6 +644,87 @@ async function main(): Promise<void> {
       }
       if (queryResult.lastAssistantUuid) {
         resumeAt = queryResult.lastAssistantUuid;
+      }
+
+      // Check if context threshold reached - exit to trigger compact
+      if (queryResult.needsCompact) {
+        log(`Context threshold reached (remaining: ${queryResult.remainingTokens}), generating compact summary`);
+
+        // Ask model to generate a summary for the next session
+        const summaryPrompt = `[SYSTEM] Session about to compact. Write a BRIEF summary for your next session:
+
+1. **What were we doing?** (current task)
+2. **What did we decide?** (key decisions)
+3. **What's next?** (pending actions)
+
+Use the Write tool to save to: /workspace/group/.nanoclaw/compact-summary.md
+
+Format:
+# Session Summary - {date}
+
+## Current Task
+...
+
+## Key Decisions
+- ...
+
+## Pending Actions
+- ...
+
+## Important Context
+...
+
+Keep it SHORT - max 50 lines. This is silent - user won't see it. Reply "done" when finished.`;
+
+        try {
+          const summaryResult = await runQuery(summaryPrompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+          if (summaryResult.lastAssistantUuid) {
+            resumeAt = summaryResult.lastAssistantUuid;
+          }
+          log(`Compact summary generated`);
+        } catch (err) {
+          log(`Failed to generate compact summary: ${err}`);
+        }
+
+        // Emit final session update with needsCompact flag
+        writeOutput({
+          status: 'success',
+          result: null,
+          newSessionId: sessionId,
+          needsCompact: true,
+          remainingTokens: queryResult.remainingTokens,
+        });
+        break;
+      }
+
+      // Check if memory flush needed (before compact)
+      const flushThreshold = containerInput.memoryFlushThresholdTokens || 0;
+      if (
+        !memoryFlushed &&
+        flushThreshold > 0 &&
+        queryResult.remainingTokens !== undefined &&
+        queryResult.remainingTokens < flushThreshold
+      ) {
+        log(`Memory flush threshold reached (remaining: ${queryResult.remainingTokens} < ${flushThreshold}), triggering flush`);
+        memoryFlushed = true;
+
+        // Inject silent prompt to trigger memory writing
+        const flushPrompt = containerInput.memoryFlushPrompt ||
+          '[SYSTEM] Context approaching limit. Write any important decisions, preferences, or facts to your CLAUDE.md memory file now. Reply with NO_REPLY if nothing to store.';
+
+        // Run a silent query to flush memory
+        const flushResult = await runQuery(flushPrompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+        if (flushResult.newSessionId) {
+          sessionId = flushResult.newSessionId;
+        }
+        if (flushResult.lastAssistantUuid) {
+          resumeAt = flushResult.lastAssistantUuid;
+        }
+
+        log(`Memory flush completed, continuing with session`);
+
+        // Continue to wait for next message (don't emit result from flush)
+        continue;
       }
 
       // If _close was consumed during the query, exit immediately.

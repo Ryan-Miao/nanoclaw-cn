@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  COMPACT_THRESHOLD_TOKENS,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
@@ -39,6 +40,9 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+  compactThresholdTokens?: number;  // Trigger compact when remaining tokens < threshold
+  memoryFlushThresholdTokens?: number;  // Trigger memory flush when remaining < threshold
+  memoryFlushPrompt?: string;  // Custom prompt for memory flush
 }
 
 export interface ContainerOutput {
@@ -46,6 +50,16 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  // Context management signals
+  needsCompact?: boolean;      // True when context threshold reached
+  compactSummary?: string;     // Summary to inject into new session
+  remainingTokens?: number;    // Tokens remaining before threshold
+  // Token usage info (for /usage command)
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    contextWindow: number;
+  };
 }
 
 interface VolumeMount {
@@ -294,6 +308,10 @@ export async function runContainerAgent(
 
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
+
+  // Ensure memory directories exist for memory flush feature
+  const memoryDir = path.join(groupDir, 'memory');
+  fs.mkdirSync(memoryDir, { recursive: true });
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
