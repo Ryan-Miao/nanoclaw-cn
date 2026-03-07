@@ -85,6 +85,13 @@ export const DISABLE_WHATSAPP =
   process.env.DISABLE_WHATSAPP === 'true' ||
   readEnvFile(['DISABLE_WHATSAPP']).DISABLE_WHATSAPP === 'true';
 
+// Context window size for the model (in tokens)
+// GLM-5: 200,000 tokens
+export const CONTEXT_WINDOW = parseInt(
+  process.env.CONTEXT_WINDOW || '200000',
+  10,
+);
+
 // Context management: trigger compact when remaining tokens < threshold
 // Default 50K for 200K context models (like GLM-5)
 // Set to 0 to disable automatic compact

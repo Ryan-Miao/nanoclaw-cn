@@ -16,6 +16,7 @@ const TARGET_HOST = process.env.GATEWAY_TARGET_HOST || 'open.bigmodel.cn';
 const TARGET_PORT = parseInt(process.env.GATEWAY_TARGET_PORT || '443');
 const LOG_DIR = process.env.GATEWAY_LOG_DIR || '/workspace/group/logs/api';
 const LOG_BODY = process.env.GATEWAY_LOG_BODY === 'true'; // 是否记录完整请求/响应体
+const SESSION_ID = process.env.GATEWAY_SESSION_ID || ''; // 当前会话 ID
 
 // 确保日志目录存在
 try {
@@ -124,6 +125,7 @@ const server = http.createServer(async (req, res) => {
         // 记录日志
         logRequest({
           timestamp: new Date().toISOString(),
+          sessionId: SESSION_ID,
           requestId,
           duration,
           streaming: true,
@@ -172,6 +174,7 @@ const server = http.createServer(async (req, res) => {
         // 记录日志
         logRequest({
           timestamp: new Date().toISOString(),
+          sessionId: SESSION_ID,
           requestId,
           duration,
           streaming: false,
@@ -208,6 +211,7 @@ const server = http.createServer(async (req, res) => {
     console.error(`[gateway] Proxy error: ${err.message}`);
     logRequest({
       timestamp: new Date().toISOString(),
+      sessionId: SESSION_ID,
       requestId,
       error: err.message,
       request: {

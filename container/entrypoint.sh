@@ -11,9 +11,13 @@ chmod -R a-w /tmp/dist
 # 读取 stdin 到临时文件
 cat > /tmp/input.json
 
+# 从输入中提取 sessionId
+SESSION_ID=$(cat /tmp/input.json | node -e "const d=require('fs').readFileSync('/dev/stdin','utf8');const j=JSON.parse(d);console.log(j.sessionId||'')")
+
 # 启动 API gateway (后台运行)
 export GATEWAY_LOG_DIR="/workspace/group/logs/api"
 export GATEWAY_LOG_BODY="true"  # 记录完整请求/响应体
+export GATEWAY_SESSION_ID="$SESSION_ID"
 node /app/gateway/server.js &
 GATEWAY_PID=$!
 
