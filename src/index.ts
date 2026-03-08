@@ -287,7 +287,29 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
+    // 处理 streaming 状态的消息
+    if (result.status === 'streaming') {
+      if (result.result) {
+        // 根据消息类型添加前缀
+        let text: string;
+        if (result.messageType === 'assistant') {
+          text = `[助手] ${result.result}`;
+        } else if (result.messageType === 'tool_use') {
+          text = `[工具] ${result.result}`;
+        } else {
+          text = result.result;
+        }
+
+        logger.info(
+          { group: group.name, messageType: result.messageType },
+          `Streaming: ${text.slice(0, 100)}`,
+        );
+        await channel.sendMessage(chatJid, text);
+      }
+      return; // streaming 消息不重置 idle timer
+    }
+
+    // 原有的 result 处理逻辑保持不变
     if (result.result) {
       const raw =
         typeof result.result === 'string'
