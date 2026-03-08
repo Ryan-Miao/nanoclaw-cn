@@ -290,21 +290,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // 处理 streaming 状态的消息
     if (result.status === 'streaming') {
       if (result.result) {
-        // 根据消息类型添加前缀
-        let text: string;
-        if (result.messageType === 'assistant') {
-          text = `[助手] ${result.result}`;
-        } else if (result.messageType === 'tool_use') {
-          text = `[工具] ${result.result}`;
-        } else {
-          text = result.result;
-        }
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const raw = result.result.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        if (raw) {
+          // 根据消息类型添加前缀
+          let text: string;
+          if (result.messageType === 'assistant') {
+            text = `[助手] ${raw}`;
+          } else if (result.messageType === 'tool_use') {
+            text = `[工具] ${raw}`;
+          } else {
+            text = raw;
+          }
 
-        logger.info(
-          { group: group.name, messageType: result.messageType },
-          `Streaming: ${text.slice(0, 100)}`,
-        );
-        await channel.sendMessage(chatJid, text);
+          logger.info(
+            { group: group.name, messageType: result.messageType },
+            `Streaming: ${text.slice(0, 100)}`,
+          );
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
       }
       return; // streaming 消息不重置 idle timer
     }
