@@ -63,26 +63,18 @@
 | `/workspace/project` | 项目根目录 | 只读 |
 | `/workspace/group` | `groups/main/` | 读写 |
 
-### 查看当前 Group 信息
+### 查看群组信息
+
+群组元数据存储在主机 SQLite 数据库，容器不可直接访问。
+
+可通过文件系统查看群组文件夹：
 
 ```bash
-# 查看当前容器名（包含 group ID）
-hostname
+# 查看所有群组文件夹
+ls -la /workspace/project/groups/
 
-# 查看所有飞书群配置
-echo "=== 所有飞书群 ==="
-for d in /workspace/project/groups/feishu_*/; do
-  name=$(basename "$d")
-  config="$d/config.json"
-  if [ -f "$config" ]; then
-    echo "$name: $(cat "$config")"
-  else
-    echo "$name: (无配置)"
-  fi
-done
-
-# 查看当前 group 的配置
-cat /workspace/group/config.json 2>/dev/null || echo "当前 group 无 config.json"
+# 查看某群组的内容
+ls -la /workspace/project/groups/feishu_65a3b8/
 ```
 
 **注意**：容器内没有 docker 命令。
@@ -99,18 +91,6 @@ cat /workspace/group/config.json 2>/dev/null || echo "当前 group 无 config.js
 - `groups/main/` - 主频道（当前）
 - `groups/global/` - 全局配置
 - `groups/feishu_xxx/` - 飞书群
-
-### 飞书群配置
-
-每个飞书群在 `groups/feishu_xxx/config.json`:
-
-```json
-{
-  "name": "群名称",
-  "folder": "feishu_xxx",
-  "trigger": "@Andy"
-}
-```
 
 ### 触发行为
 
