@@ -63,32 +63,24 @@
 | `/workspace/project` | 项目根目录 | 只读 |
 | `/workspace/group` | `groups/main/` | 读写 |
 
-### 查看当前活跃的 Channel 和 Group
+### 查看当前 Group 信息
 
 ```bash
-# 查看当前 group 的 ID（从容器名称解析）
-hostname | sed 's/nanoclaw-//' | sed 's/-[0-9]*$//'
+# 查看当前 group 的 ID（从容器 hostname 解析）
+# 格式: nanoclaw-{group_folder}-{timestamp}
+hostname
 
-# 查看当前 group 的配置
-cat /workspace/group/config.json 2>/dev/null || echo "无 config.json"
+# 查看当前 group 的配置（如果有）
+cat /workspace/group/config.json 2>/dev/null || echo "当前 group 无 config.json"
 
-# 查看所有 groups 文件夹及其配置
-for d in /workspace/project/groups/*/; do
-  name=$(basename "$d")
-  config="$d/config.json"
-  if [ -f "$config" ]; then
-    echo "$name: $(cat "$config" | tr '\n' ' ')"
-  else
-    echo "$name: (无配置)"
-  fi
-done
+# 查看所有可用的 groups
+ls /workspace/project/groups/
 
-# 查看当前活跃的容器（每个容器对应一个 channel）
-docker ps --format "table {{.Names}}\t{{.Status}}"
-
-# 容器名称格式: nanoclaw-{channel}-{timestamp}
-# 例如: nanoclaw-feishu-65a3b8-xxx 表示 feishu_65a3b8 频道
+# 查看当前 group 的 CLAUDE.md
+head -20 /workspace/group/CLAUDE.md
 ```
+
+**注意**：容器内没有 docker 命令，无法查看其他容器。
 
 ---
 
