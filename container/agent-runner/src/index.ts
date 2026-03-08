@@ -573,25 +573,15 @@ async function runQuery(
       }
     }
 
-    if (message.type === 'tool_use') {
-      const toolMsg = message as { name?: string; input?: unknown };
-      const toolName = toolMsg.name || 'unknown';
-      const toolInput = toolMsg.input || {};
+    if (message.type === 'tool_use_summary') {
+      const toolMsg = message as { summary?: string };
+      const summary = toolMsg.summary || '';
 
-      // Bash 命令只显示 command，不显示完整 JSON
-      let result: string;
-      if (toolName === 'Bash' && typeof toolInput === 'object' && toolInput !== null) {
-        const input = toolInput as { command?: string };
-        result = `${toolName}: ${input.command || ''}`;
-      } else {
-        result = `${toolName}: ${JSON.stringify(toolInput)}`;
-      }
-
-      log(`Tool use: ${result}`);
+      log(`Tool use: ${summary}`);
       writeOutput({
         status: 'streaming',
         messageType: 'tool_use',
-        result,
+        result: summary,
       });
     }
 

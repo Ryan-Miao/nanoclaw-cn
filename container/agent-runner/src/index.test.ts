@@ -122,37 +122,30 @@ describe('assistant message handling', () => {
   });
 });
 
-describe('tool_use message handling', () => {
-  it('should format tool_use message', () => {
+describe('tool_use_summary message handling', () => {
+  it('should format tool_use_summary message', () => {
     const message = {
-      type: 'tool_use',
-      name: 'Read',
-      input: { file_path: '/src/test.ts' },
+      type: 'tool_use_summary',
+      summary: 'Read: {"file_path":"/src/test.ts"}',
     };
-    const toolName = message.name || 'unknown';
-    const toolInput = message.input || {};
-    const result = `${toolName}: ${JSON.stringify(toolInput)}`;
-    expect(result).toBe('Read: {"file_path":"/src/test.ts"}');
+    const summary = message.summary || '';
+    expect(summary).toBe('Read: {"file_path":"/src/test.ts"}');
   });
 
-  it('should handle Bash tool specially', () => {
+  it('should handle Bash tool summary', () => {
     const message = {
-      type: 'tool_use',
-      name: 'Bash',
-      input: { command: 'npm test' },
+      type: 'tool_use_summary',
+      summary: 'Bash: npm test',
     };
-    const toolName = message.name || 'unknown';
-    const toolInput = message.input as { command?: string };
-    const result = `${toolName}: ${toolInput.command || ''}`;
-    expect(result).toBe('Bash: npm test');
+    const summary = message.summary || '';
+    expect(summary).toBe('Bash: npm test');
   });
 
-  it('should handle missing name', () => {
+  it('should handle empty summary', () => {
     const message = {
-      type: 'tool_use',
-      input: { file_path: 'test.ts' },
+      type: 'tool_use_summary',
     };
-    const toolName = message.name || 'unknown';
-    expect(toolName).toBe('unknown');
+    const summary = (message as { summary?: string }).summary || '';
+    expect(summary).toBe('');
   });
 });
