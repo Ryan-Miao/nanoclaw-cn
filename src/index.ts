@@ -291,7 +291,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (result.status === 'streaming') {
       if (result.result) {
         // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-        const raw = result.result.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        const raw = result.result
+          .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+          .trim();
         if (raw) {
           // 根据消息类型添加前缀
           let text: string;

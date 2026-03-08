@@ -555,21 +555,24 @@ async function runQuery(
     }
 
     if (message.type === 'assistant') {
-      // Extract text content from assistant message
-      const assistantMsg = message as { content?: Array<{ type: string; text?: string }> };
-      const textContent = assistantMsg.content
-        ?.filter(b => b.type === 'text')
-        .map(b => b.text || '')
-        .filter(t => t.trim())
-        .join('\n');
+      // SDK assistant message structure: { type, message: { content: [...] }, ... }
+      const wrapper = message as { message?: { content?: Array<{ type: string; text?: string }> } };
+      const innerMessage = wrapper.message;
 
-      if (textContent) {
-        log(`Assistant message: ${textContent.slice(0, 100)}...`);
-        writeOutput({
-          status: 'streaming',
-          messageType: 'assistant',
-          result: textContent,
-        });
+      if (innerMessage?.content) {
+        const textContent = innerMessage.content
+          .filter(b => b.type === 'text')
+          .map(b => b.text || '')
+          .filter(t => t.trim())
+          .join('\n');
+
+        if (textContent) {
+          writeOutput({
+            status: 'streaming',
+            messageType: 'assistant',
+            result: textContent,
+          });
+        }
       }
     }
 
