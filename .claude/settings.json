@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [".claude/hooks/check-plan.sh", ".claude/hooks/check-tdd.sh"]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [".claude/hooks/remind-handoff.sh", ".claude/hooks/remind-archive.sh"]
+      }
+    ]
+  }
+}
