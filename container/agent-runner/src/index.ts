@@ -76,6 +76,59 @@ const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
 /**
+ * Read the last API error from gateway log file.
+ * Returns the actual error message from the API (e.g., rate limit message).
+ */
+function getLastApiError(): string | null {
+  const logDir = '/workspace/group/logs/api';
+  const date = new Date().toISOString().split('T')[0];
+  const logFile = path.join(logDir, `api-${date}.jsonl`);
+
+  try {
+    if (!fs.existsSync(logFile)) return null;
+
+    // Read last 50 lines to find errors
+    const content = fs.readFileSync(logFile, 'utf-8');
+    const lines = content.trim().split('\n').slice(-50);
+
+    // Search backwards for the most recent error
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const entry = JSON.parse(lines[i]);
+        const resp = entry.response || {};
+        const body = resp.body;
+
+        // Check for error in response body
+        if (resp.status && resp.status !== 200 && body) {
+          // Try to extract error message from various formats
+          if (typeof body === 'object' && body.error) {
+            return body.error.message || body.error.code || JSON.stringify(body.error);
+          }
+          if (typeof body === 'string') {
+            // Try to parse SSE format
+            for (const line of body.split('\n')) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6).trim());
+                  if (data.error) {
+                    return data.error.message || data.error.code || JSON.stringify(data.error);
+                  }
+                } catch { /* ignore */ }
+              }
+            }
+          }
+        }
+      } catch { /* ignore parse errors */ }
+    }
+  } catch (err) {
+    // Log but don't fail
+    console.error(`[agent-runner] Failed to read gateway log: ${err}`);
+  }
+
+  return null;
+}
+
+/**
  * Push-based async iterable for streaming user messages to the SDK.
  * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
  */
@@ -506,19 +559,22 @@ async function runQuery(
       // Debug: log full message to see what SDK returns
       log(`Result message keys: ${Object.keys(message).join(', ')}`);
 
-      // Improve generic API error messages
+      // Improve generic API error messages by reading actual error from gateway log
       if (textResult && textResult.startsWith('API Error:')) {
         const errorType = textResult.replace('API Error: ', '');
-        const errorMap: Record<string, string> = {
-          'terminated': 'API 请求被中断（可能是限流或超时），请稍后重试',
-          'Unable to connect to API': '无法连接到 API，请检查网络',
-          'The model has reached its context window limit': '上下文超出限制，请使用 /compact 压缩会话',
-        };
-        if (errorMap[errorType]) {
-          textResult = errorMap[errorType];
-          log(`Translated API error: ${errorType} -> ${textResult}`);
+        // Try to get the actual error from gateway log
+        const actualError = getLastApiError();
+        if (actualError) {
+          textResult = `API 错误: ${actualError}`;
+          log(`Found actual API error in gateway log: ${actualError}`);
         } else {
-          textResult = `API 错误: ${errorType}`;
+          // Fallback to generic messages
+          const errorMap: Record<string, string> = {
+            'terminated': 'API 请求被中断（可能是限流或超时），请稍后重试',
+            'Unable to connect to API': '无法连接到 API，请检查网络',
+            'The model has reached its context window limit': '上下文超出限制，请使用 /compact 压缩会话',
+          };
+          textResult = errorMap[errorType] || `API 错误: ${errorType}`;
         }
       }
 
