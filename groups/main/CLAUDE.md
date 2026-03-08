@@ -41,13 +41,14 @@
 - 超过 500 行的文件拆分到文件夹
 - 保留文件索引
 
-## WhatsApp 格式
+## 飞书格式
 
-WhatsApp 消息中**不要**使用 markdown 标题（##）。只用：
-- *粗体*（单星号，绝不用双星号）
-- _斜体_（下划线）
+飞书消息中**可以**使用 markdown。支持：
+- **粗体**（双星号）
+- *斜体*（单星号）
 - • 列表项
 - ```代码块```
+- 表格
 
 ---
 
@@ -62,78 +63,48 @@ WhatsApp 消息中**不要**使用 markdown 标题（##）。只用：
 | `/workspace/project` | 项目根目录 | 只读 |
 | `/workspace/group` | `groups/main/` | 读写 |
 
-关键路径：
-- `/workspace/project/store/messages.db` - SQLite 数据库
-- `/workspace/project/data/registered_groups.json` - 群组配置
-- `/workspace/project/groups/` - 所有群组文件夹
+### 查看当前活跃的 Channel 和 Group
+
+```bash
+# 查看所有 groups 文件夹
+ls -la /workspace/project/groups/
+
+# 查看当前活跃的容器（每个容器对应一个 channel）
+docker ps --format "table {{.Names}}\t{{.Status}}"
+
+# 容器名称格式: nanoclaw-{channel}-{timestamp}
+# 例如: nanoclaw-feishu-65a3b8-xxx 表示 feishu_65a3b8 频道
+```
 
 ---
 
 ## 群组管理
 
-### 查找可用群组
+### 当前系统架构
 
-可用群组列表在 `/workspace/ipc/available_groups.json`。
+系统连接的是 **飞书频道**，不是 WhatsApp。
 
-如果用户提到的群组不在列表中，请求刷新：
+群组文件夹结构：
+- `groups/main/` - 主频道（当前）
+- `groups/global/` - 全局配置
+- `groups/feishu_xxx/` - 飞书群
 
-```bash
-echo '{"type": "refresh_groups"}' > /workspace/ipc/tasks/refresh_$(date +%s).json
-```
+### 飞书群配置
 
-**备用方案**：直接查询数据库：
-
-```bash
-sqlite3 /workspace/project/store/messages.db "
-  SELECT jid, name, last_message_time
-  FROM chats
-  WHERE jid LIKE '%@g.us' AND jid != '__group_sync__'
-  ORDER BY last_message_time DESC
-  LIMIT 10;
-"
-```
-
-### 已注册群组配置
-
-配置文件：`/workspace/project/data/registered_groups.json`
+每个飞书群在 `groups/feishu_xxx/config.json`:
 
 ```json
 {
-  "1234567890@g.us": {
-    "name": "Family Chat",
-    "folder": "family-chat",
-    "trigger": "@Andy",
-    "added_at": "2024-01-31T12:00:00Z"
-  }
+  "name": "群名称",
+  "folder": "feishu_xxx",
+  "trigger": "@Andy"
 }
 ```
 
-字段说明：
-- **jid**: WhatsApp 群组唯一标识
-- **name**: 显示名称
-- **folder**: `groups/` 下的文件夹名
-- **trigger**: 触发词
-- **requiresTrigger**: 是否需要触发词（默认 `true`，私聊设为 `false`）
-
 ### 触发行为
 
-- **主频道**: 无需触发词，自动处理所有消息
-- **requiresTrigger: false**: 无需触发词
-- **其他群组**: 消息必须以 `@Andy` 开头
-
-### 添加群组
-
-1. 查询数据库获取 JID
-2. 读取 `registered_groups.json`
-3. 添加新条目
-4. 写回 JSON
-5. 创建群组文件夹
-
-### 移除群组
-
-1. 读取配置
-2. 删除条目
-3. 写回 JSON（文件夹保留）
+- **主频道 (main)**: 无需触发词，自动处理所有消息
+- **飞书群**: 根据配置决定是否需要触发词
 
 ---
 
@@ -173,7 +144,7 @@ sqlite3 /workspace/project/store/messages.db "
 使用 `target_group_jid` 参数：
 
 ```
-schedule_task(prompt: "...", target_group_jid: "120363336345536173@g.us")
+schedule_task(prompt: "...", target_group_jid: "feishu_65a3b8")
 ```
 
 任务会在该群组的上下文中运行。
