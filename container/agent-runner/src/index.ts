@@ -554,6 +554,25 @@ async function runQuery(
       log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
     }
 
+    if (message.type === 'assistant') {
+      // Extract text content from assistant message
+      const assistantMsg = message as { content?: Array<{ type: string; text?: string }> };
+      const textContent = assistantMsg.content
+        ?.filter(b => b.type === 'text')
+        .map(b => b.text || '')
+        .filter(t => t.trim())
+        .join('\n');
+
+      if (textContent) {
+        log(`Assistant message: ${textContent.slice(0, 100)}...`);
+        writeOutput({
+          status: 'streaming',
+          messageType: 'assistant',
+          result: textContent,
+        });
+      }
+    }
+
     if (message.type === 'result') {
       resultCount++;
       let textResult = 'result' in message ? (message as { result?: string }).result : null;

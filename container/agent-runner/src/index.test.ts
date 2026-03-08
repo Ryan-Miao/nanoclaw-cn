@@ -90,3 +90,34 @@ describe('ContainerOutput', () => {
     expect(output.tokenUsage?.inputTokens).toBe(10000);
   });
 });
+
+describe('assistant message handling', () => {
+  it('should extract text from assistant message', () => {
+    const message = {
+      type: 'assistant',
+      content: [
+        { type: 'text', text: 'Hello' },
+        { type: 'text', text: ' world' },
+      ],
+    };
+    const textContent = message.content
+      .filter((b: { type: string }) => b.type === 'text')
+      .map((b: { text?: string }) => b.text || '')
+      .filter(t => t.trim())
+      .join('\n');
+    expect(textContent).toBe('Hello\n world');
+  });
+
+  it('should handle empty content array', () => {
+    const message = {
+      type: 'assistant',
+      content: [],
+    };
+    const textContent = message.content
+      ?.filter((b: { type: string }) => b.type === 'text')
+      .map((b: { text?: string }) => b.text || '')
+      .filter(t => t.trim())
+      .join('\n');
+    expect(textContent).toBe('');
+  });
+});
