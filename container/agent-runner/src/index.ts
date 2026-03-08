@@ -501,10 +501,26 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
+      let textResult = 'result' in message ? (message as { result?: string }).result : null;
 
       // Debug: log full message to see what SDK returns
       log(`Result message keys: ${Object.keys(message).join(', ')}`);
+
+      // Improve generic API error messages
+      if (textResult && textResult.startsWith('API Error:')) {
+        const errorType = textResult.replace('API Error: ', '');
+        const errorMap: Record<string, string> = {
+          'terminated': 'API 请求被中断（可能是限流或超时），请稍后重试',
+          'Unable to connect to API': '无法连接到 API，请检查网络',
+          'The model has reached its context window limit': '上下文超出限制，请使用 /compact 压缩会话',
+        };
+        if (errorMap[errorType]) {
+          textResult = errorMap[errorType];
+          log(`Translated API error: ${errorType} -> ${textResult}`);
+        } else {
+          textResult = `API 错误: ${errorType}`;
+        }
+      }
 
       // Track token usage for context management
       // SDK returns snake_case field names: input_tokens, output_tokens

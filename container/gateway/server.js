@@ -122,6 +122,33 @@ const server = http.createServer(async (req, res) => {
         // 解析流式响应中的 usage
         const usage = parseStreamUsage(chunks);
 
+        // 检测错误响应并输出更详细的信息
+        if (proxyRes.statusCode !== 200) {
+          const fullResponse = chunks.join('');
+          let errorMsg = 'Unknown error';
+          try {
+            // 尝试解析 SSE 格式的错误
+            for (const line of fullResponse.split('\n')) {
+              if (line.startsWith('data: ')) {
+                const data = JSON.parse(line.slice(6).trim());
+                if (data.error) {
+                  errorMsg = data.error.message || data.error.code || JSON.stringify(data.error);
+                  break;
+                }
+              }
+            }
+          } catch {
+            // 尝试直接解析 JSON
+            try {
+              const json = JSON.parse(fullResponse);
+              errorMsg = json.error?.message || json.error?.code || fullResponse.slice(0, 200);
+            } catch {
+              errorMsg = fullResponse.slice(0, 200);
+            }
+          }
+          console.error(`[gateway] API Error (${proxyRes.statusCode}): ${errorMsg}`);
+        }
+
         // 记录日志
         logRequest({
           timestamp: new Date().toISOString(),
