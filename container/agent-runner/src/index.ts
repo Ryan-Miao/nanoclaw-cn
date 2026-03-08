@@ -34,7 +34,7 @@ interface ContainerInput {
 }
 
 interface ContainerOutput {
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'streaming';
   result: string | null;
   newSessionId?: string;
   error?: string;
@@ -48,6 +48,8 @@ interface ContainerOutput {
     outputTokens: number;
     contextWindow: number;
   };
+  // Message type for streaming messages
+  messageType?: 'assistant' | 'tool_use' | 'result';
 }
 
 // Compact summary file path (relative to group folder)

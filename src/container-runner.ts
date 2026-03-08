@@ -46,7 +46,7 @@ export interface ContainerInput {
 }
 
 export interface ContainerOutput {
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'streaming';
   result: string | null;
   newSessionId?: string;
   error?: string;
@@ -60,6 +60,8 @@ export interface ContainerOutput {
     outputTokens: number;
     contextWindow: number;
   };
+  // Message type for streaming messages
+  messageType?: 'assistant' | 'tool_use' | 'result';
 }
 
 interface VolumeMount {
