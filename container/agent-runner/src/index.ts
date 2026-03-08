@@ -49,7 +49,7 @@ interface ContainerOutput {
     contextWindow: number;
   };
   // Message type for streaming messages
-  messageType?: 'assistant' | 'tool_use' | 'result';
+  messageType?: 'assistant' | 'tool_use' | 'result' | 'system';
 }
 
 // Compact summary file path (relative to group folder)
@@ -128,6 +128,27 @@ function getLastApiError(): string | null {
   }
 
   return null;
+}
+
+/**
+ * Format task notification for user display.
+ * Returns a human-readable string with emoji and status.
+ */
+function formatTaskNotification(data: Record<string, unknown>): string {
+  const taskId = data.task_id ? String(data.task_id).slice(0, 8) : '?';
+  const status = String(data.status || 'unknown');
+  const summary = data.summary ? String(data.summary).slice(0, 100) : '';
+
+  const statusEmoji: Record<string, string> = {
+    pending: '⏳',
+    running: '🔄',
+    in_progress: '🔄',
+    completed: '✅',
+    failed: '❌',
+  };
+
+  const emoji = statusEmoji[status] || '📋';
+  return `${emoji} Task ${taskId}: ${status}${summary ? ` - ${summary}` : ''}`;
 }
 
 /**
@@ -550,8 +571,22 @@ async function runQuery(
     }
 
     if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
-      const tn = message as { task_id: string; status: string; summary: string };
+      const tn = message as { task_id: string; status: string; summary: string; data?: Record<string, unknown> };
       log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
+
+      // Format and send task notification to user
+      const taskData: Record<string, unknown> = {
+        task_id: tn.task_id,
+        status: tn.status,
+        summary: tn.summary,
+        ...(tn.data || {}),
+      };
+      const formatted = formatTaskNotification(taskData);
+      writeOutput({
+        status: 'streaming',
+        messageType: 'system',
+        result: formatted,
+      });
     }
 
     if (message.type === 'assistant') {
