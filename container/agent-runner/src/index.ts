@@ -613,12 +613,12 @@ async function runQuery(
               result: block.text,
             });
           } else if (block.type === 'tool_use' && block.name) {
-            // Format tool use: ToolName(input summary)
+            // Format tool use with emoji prefix
             const inputStr = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
             writeOutput({
               status: 'streaming',
               messageType: 'tool_use',
-              result: `${block.name}${inputStr ? ': ' + inputStr : ''}`,
+              result: `🔧 ${block.name}${inputStr ? ': ' + inputStr : ''}`,
             });
           }
           // Skip thinking blocks and other types
@@ -634,7 +634,7 @@ async function runQuery(
       writeOutput({
         status: 'streaming',
         messageType: 'tool_use',
-        result: summary,
+        result: `🔧 ${summary}`,
       });
     }
 
