@@ -121,3 +121,38 @@ describe('assistant message handling', () => {
     expect(textContent).toBe('');
   });
 });
+
+describe('tool_use message handling', () => {
+  it('should format tool_use message', () => {
+    const message = {
+      type: 'tool_use',
+      name: 'Read',
+      input: { file_path: '/src/test.ts' },
+    };
+    const toolName = message.name || 'unknown';
+    const toolInput = message.input || {};
+    const result = `${toolName}: ${JSON.stringify(toolInput)}`;
+    expect(result).toBe('Read: {"file_path":"/src/test.ts"}');
+  });
+
+  it('should handle Bash tool specially', () => {
+    const message = {
+      type: 'tool_use',
+      name: 'Bash',
+      input: { command: 'npm test' },
+    };
+    const toolName = message.name || 'unknown';
+    const toolInput = message.input as { command?: string };
+    const result = `${toolName}: ${toolInput.command || ''}`;
+    expect(result).toBe('Bash: npm test');
+  });
+
+  it('should handle missing name', () => {
+    const message = {
+      type: 'tool_use',
+      input: { file_path: 'test.ts' },
+    };
+    const toolName = message.name || 'unknown';
+    expect(toolName).toBe('unknown');
+  });
+});

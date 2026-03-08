@@ -573,6 +573,28 @@ async function runQuery(
       }
     }
 
+    if (message.type === 'tool_use') {
+      const toolMsg = message as { name?: string; input?: unknown };
+      const toolName = toolMsg.name || 'unknown';
+      const toolInput = toolMsg.input || {};
+
+      // Bash 命令只显示 command，不显示完整 JSON
+      let result: string;
+      if (toolName === 'Bash' && typeof toolInput === 'object' && toolInput !== null) {
+        const input = toolInput as { command?: string };
+        result = `${toolName}: ${input.command || ''}`;
+      } else {
+        result = `${toolName}: ${JSON.stringify(toolInput)}`;
+      }
+
+      log(`Tool use: ${result}`);
+      writeOutput({
+        status: 'streaming',
+        messageType: 'tool_use',
+        result,
+      });
+    }
+
     if (message.type === 'result') {
       resultCount++;
       let textResult = 'result' in message ? (message as { result?: string }).result : null;
