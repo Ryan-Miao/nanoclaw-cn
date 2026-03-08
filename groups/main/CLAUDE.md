@@ -66,21 +66,26 @@
 ### 查看当前 Group 信息
 
 ```bash
-# 查看当前 group 的 ID（从容器 hostname 解析）
-# 格式: nanoclaw-{group_folder}-{timestamp}
+# 查看当前容器名（包含 group ID）
 hostname
 
-# 查看当前 group 的配置（如果有）
+# 查看所有飞书群配置
+echo "=== 所有飞书群 ==="
+for d in /workspace/project/groups/feishu_*/; do
+  name=$(basename "$d")
+  config="$d/config.json"
+  if [ -f "$config" ]; then
+    echo "$name: $(cat "$config")"
+  else
+    echo "$name: (无配置)"
+  fi
+done
+
+# 查看当前 group 的配置
 cat /workspace/group/config.json 2>/dev/null || echo "当前 group 无 config.json"
-
-# 查看所有可用的 groups
-ls /workspace/project/groups/
-
-# 查看当前 group 的 CLAUDE.md
-head -20 /workspace/group/CLAUDE.md
 ```
 
-**注意**：容器内没有 docker 命令，无法查看其他容器。
+**注意**：容器内没有 docker 命令。
 
 ---
 
