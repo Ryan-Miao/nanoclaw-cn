@@ -556,22 +556,37 @@ async function runQuery(
 
     if (message.type === 'assistant') {
       // SDK assistant message structure: { type, message: { content: [...] }, ... }
-      const wrapper = message as { message?: { content?: Array<{ type: string; text?: string }> } };
+      // Output all content blocks with their type prefix
+      const wrapper = message as {
+        message?: {
+          content?: Array<{
+            type: string;
+            text?: string;
+            name?: string;
+            input?: unknown;
+          }>;
+        };
+      };
       const innerMessage = wrapper.message;
 
       if (innerMessage?.content) {
-        const textContent = innerMessage.content
-          .filter(b => b.type === 'text')
-          .map(b => b.text || '')
-          .filter(t => t.trim())
-          .join('\n');
-
-        if (textContent) {
-          writeOutput({
-            status: 'streaming',
-            messageType: 'assistant',
-            result: textContent,
-          });
+        for (const block of innerMessage.content) {
+          if (block.type === 'text' && block.text?.trim()) {
+            writeOutput({
+              status: 'streaming',
+              messageType: 'assistant',
+              result: block.text,
+            });
+          } else if (block.type === 'tool_use' && block.name) {
+            // Format tool use: ToolName(input summary)
+            const inputStr = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
+            writeOutput({
+              status: 'streaming',
+              messageType: 'tool_use',
+              result: `${block.name}${inputStr ? ': ' + inputStr : ''}`,
+            });
+          }
+          // Skip thinking blocks and other types
         }
       }
     }
