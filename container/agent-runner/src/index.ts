@@ -538,6 +538,13 @@ async function runQuery(
         remainingTokens,
         tokenUsage,
       });
+
+      // If compact threshold reached, stop processing immediately to prevent
+      // session from growing further. The host will handle compact on next run.
+      if (needsCompact) {
+        log(`Context threshold reached (${remainingTokens} < ${threshold}), ending query early`);
+        break;
+      }
     }
   }
 
