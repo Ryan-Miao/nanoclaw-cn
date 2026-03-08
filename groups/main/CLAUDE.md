@@ -66,8 +66,22 @@
 ### 查看当前活跃的 Channel 和 Group
 
 ```bash
-# 查看所有 groups 文件夹
-ls -la /workspace/project/groups/
+# 查看当前 group 的 ID（从容器名称解析）
+hostname | sed 's/nanoclaw-//' | sed 's/-[0-9]*$//'
+
+# 查看当前 group 的配置
+cat /workspace/group/config.json 2>/dev/null || echo "无 config.json"
+
+# 查看所有 groups 文件夹及其配置
+for d in /workspace/project/groups/*/; do
+  name=$(basename "$d")
+  config="$d/config.json"
+  if [ -f "$config" ]; then
+    echo "$name: $(cat "$config" | tr '\n' ' ')"
+  else
+    echo "$name: (无配置)"
+  fi
+done
 
 # 查看当前活跃的容器（每个容器对应一个 channel）
 docker ps --format "table {{.Names}}\t{{.Status}}"
