@@ -49,3 +49,4 @@ echo '{
   "decision": "reject",
   "reason": "🚫 今天没有计划文档！\n\n编码前必须先创建计划：\n1. 调用 brainstorming skill 挖掘需求\n2. 生成 docs/plans/'"$TODAY"'-*-design.md\n3. 用户确认后才能写代码\n\n📖 详见 docs/workflow-guide.md"
 }'
+exit 0

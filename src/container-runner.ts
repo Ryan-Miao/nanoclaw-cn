@@ -606,17 +606,39 @@ export async function runContainerAgent(
 
       // Streaming mode: wait for output chain to settle, return completion marker
       if (onOutput) {
-        outputChain.then(() => {
-          logger.info(
-            { group: group.name, duration, newSessionId },
-            'Container completed (streaming mode)',
-          );
-          resolve({
-            status: 'success',
-            result: null,
-            newSessionId,
+        // ✅ 添加超时保护，防止 outputChain 永久阻塞
+        const OUTPUT_CHAIN_TIMEOUT = 30000; // 30 秒
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Output chain timeout')),
+            OUTPUT_CHAIN_TIMEOUT,
+          ),
+        );
+
+        Promise.race([outputChain, timeoutPromise])
+          .then(() => {
+            logger.info(
+              { group: group.name, duration, newSessionId },
+              'Container completed (streaming mode)',
+            );
+            resolve({
+              status: 'success',
+              result: null,
+              newSessionId,
+            });
+          })
+          .catch((err) => {
+            // ✅ 超时也要 resolve，避免永久阻塞
+            logger.warn(
+              { group: group.name, err, duration, newSessionId },
+              'Output chain timeout or error, resolving anyway',
+            );
+            resolve({
+              status: 'success',
+              result: null,
+              newSessionId,
+            });
           });
-        });
         return;
       }
 

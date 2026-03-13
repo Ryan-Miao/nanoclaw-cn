@@ -3,13 +3,30 @@
     "PreToolUse": [
       {
         "matcher": "Edit|Write",
-        "hooks": [".claude/hooks/check-plan.sh", ".claude/hooks/check-tdd.sh"]
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-plan.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-tdd.sh"
+          }
+        ]
       }
     ],
     "Stop": [
       {
-        "matcher": "",
-        "hooks": [".claude/hooks/remind-handoff.sh", ".claude/hooks/remind-archive.sh"]
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/remind-handoff.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/remind-archive.sh"
+          }
+        ]
       }
     ]
   }

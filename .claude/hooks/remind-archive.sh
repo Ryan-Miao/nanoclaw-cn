@@ -17,3 +17,4 @@ if [ "$PLAN_FILES" -gt 0 ]; then
   "message": "📦 提醒: 如果功能已完成，记得归档 docs/plans/ 中的文件到 docs/archive/"
 }'
 fi
+exit 0

@@ -396,6 +396,90 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 }
 
 /**
+ * List available skills for the group
+ */
+async function doSkills(
+  group: RegisteredGroup,
+  chatJid: string,
+  channel: Channel,
+): Promise<void> {
+  // First, send a message to indicate we're working
+  await channel.sendMessage(chatJid, '📋 正在查询可用技能...');
+  await channel.setTyping?.(chatJid, true);
+
+  const skillsPrompt = `[SYSTEM] User requested to list available skills. List all skills you support in this workspace.
+
+## Task
+List all available skills in the workspace. For each skill, provide:
+- Skill name
+- Brief description
+- How to use it
+
+Format your response as a clean, readable list.
+
+Reply with the skills list. This is silent - user won't see the response.`;
+
+  let gotResult = false;
+  let skillsOutput = '';
+
+  // ✅ 添加超时保护
+  const SKILLS_TIMEOUT = 60000; // 1 分钟
+
+  try {
+    await Promise.race([
+      runAgent(group, skillsPrompt, chatJid, async (output) => {
+        // 收集输出发送给用户
+        if (output.messageType === 'assistant' && output.result) {
+          skillsOutput += output.result;
+        }
+
+        // When we get a result, close the container
+        if (output.result && !gotResult) {
+          gotResult = true;
+          logger.info({ group: group.name }, 'Skills list generated');
+          // Close stdin to let container exit
+          queue.closeStdin(chatJid);
+        }
+        // ✅ 确保回调总是返回
+        return;
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Skills timeout')), SKILLS_TIMEOUT),
+      ),
+    ]);
+
+    // ✅ 将收集到的输出发送给用户
+    if (skillsOutput) {
+      await channel.sendMessage(chatJid, skillsOutput);
+    } else {
+      await channel.sendMessage(chatJid, '⚠️ 未获取到技能列表');
+    }
+  } catch (err) {
+    const isTimeout = err instanceof Error && err.message === 'Skills timeout';
+    logger.warn(
+      { group: group.name, err, isTimeout },
+      isTimeout
+        ? 'Skills timeout, continuing anyway'
+        : 'Skills list generation failed, continuing anyway',
+    );
+
+    // ✅ 超时时强制清理容器
+    if (isTimeout) {
+      queue.closeStdin(chatJid);
+    }
+
+    // ✅ 发送错误消息
+    await channel.sendMessage(
+      chatJid,
+      isTimeout ? '⚠️ 查询技能超时，请稍后重试' : '⚠️ 查询技能失败，请稍后重试',
+    );
+  }
+
+  // ✅ 无论如何都执行清理
+  await channel.setTyping?.(chatJid, false);
+}
+
+/**
  * Execute session compact: generate summary and clear session
  * Used by both /compact command and auto compact
  */
@@ -454,23 +538,43 @@ Rules:
 Reply "done" when finished. This is silent - user won't see the response.`;
 
   let gotResult = false;
+
+  // ✅ 添加超时保护，防止 runAgent 永久阻塞
+  const COMPACT_TIMEOUT = 120000; // 2 分钟
+
   try {
-    await runAgent(group, compactPrompt, chatJid, async (output) => {
-      // When we get a result, close the container
-      if (output.result && !gotResult) {
-        gotResult = true;
-        logger.info({ group: group.name }, 'Compact summary generated');
-        // Close stdin to let container exit
-        queue.closeStdin(chatJid);
-      }
-    });
+    await Promise.race([
+      runAgent(group, compactPrompt, chatJid, async (output) => {
+        // When we get a result, close the container
+        if (output.result && !gotResult) {
+          gotResult = true;
+          logger.info({ group: group.name }, 'Compact summary generated');
+          // Close stdin to let container exit
+          queue.closeStdin(chatJid);
+        }
+        // ✅ 确保回调总是返回
+        return;
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Compact timeout')), COMPACT_TIMEOUT),
+      ),
+    ]);
   } catch (err) {
+    const isTimeout = err instanceof Error && err.message === 'Compact timeout';
     logger.warn(
-      { group: group.name, err },
-      'Compact summary generation failed, continuing anyway',
+      { group: group.name, err, isTimeout },
+      isTimeout
+        ? 'Compact timeout, continuing anyway'
+        : 'Compact summary generation failed, continuing anyway',
     );
+
+    // ✅ 超时时强制清理容器
+    if (isTimeout) {
+      queue.closeStdin(chatJid);
+    }
   }
 
+  // ✅ 无论如何都执行清理
   await channel.setTyping?.(chatJid, false);
 
   // Now clear the session
@@ -740,6 +844,7 @@ async function startMessageLoop(): Promise<void> {
 • /new - 创建新会话（清除当前会话）
 • /usage - 查看 token 使用情况
 • /compact - 压缩会话（生成摘要并创建新会话）
+• /skills - 查看当前支持的技能列表
 • /help - 显示此帮助信息
 
 💡 提示：
@@ -762,6 +867,21 @@ async function startMessageLoop(): Promise<void> {
             );
             await doCompact(group, chatJid, channel);
             lastAgentTimestamp[chatJid] = compactMessage.timestamp;
+            saveState();
+            continue;
+          }
+
+          // Check for /skills command - list available skills
+          const skillsMessage = groupMessages.find(
+            (m) => m.content.trim().toLowerCase() === '/skills',
+          );
+          if (skillsMessage) {
+            logger.info(
+              { chatJid, group: group.name },
+              '/skills command received',
+            );
+            await doSkills(group, chatJid, channel);
+            lastAgentTimestamp[chatJid] = skillsMessage.timestamp;
             saveState();
             continue;
           }
