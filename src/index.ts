@@ -895,8 +895,11 @@ async function startMessageLoop(): Promise<void> {
 
                 for (const [jid, grp] of sorted) {
                   const trigger = grp.isMain ? '无' : grp.trigger;
-                  const outputLevel = grp.containerConfig?.outputLevel || 'quiet';
-                  lines.push(`| ${grp.folder} | ${grp.name} | ${trigger} | ${outputLevel} |`);
+                  const outputLevel =
+                    grp.containerConfig?.outputLevel || 'quiet';
+                  lines.push(
+                    `| ${grp.folder} | ${grp.name} | ${trigger} | ${outputLevel} |`,
+                  );
                 }
 
                 response = lines.join('\n');

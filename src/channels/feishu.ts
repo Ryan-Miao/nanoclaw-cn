@@ -975,6 +975,9 @@ export function createFeishuChannel(opts: ChannelOpts): FeishuChannel | null {
     ...opts,
     appId,
     appSecret,
+    onAutoRegister: opts.onAutoRegister
+      ? (chatId: string) => opts.onAutoRegister!(chatId, 'feishu')
+      : undefined,
   });
 }
 

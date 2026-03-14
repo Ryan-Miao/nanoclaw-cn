@@ -27,9 +27,12 @@ export interface AllowedRoot {
   description?: string;
 }
 
+export type OutputLevel = 'verbose' | 'quiet';
+
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  outputLevel?: OutputLevel; // Default: 'quiet' (only final results)
 }
 
 export interface RegisteredGroup {
