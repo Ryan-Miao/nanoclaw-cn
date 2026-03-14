@@ -23,7 +23,7 @@ export interface FeishuChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
-  onAutoRegister?: (chatId: string) => void;
+  onAutoRegister?: (chatId: string, groupName?: string) => void;
 }
 
 export class FeishuChannel implements Channel {
@@ -103,7 +103,9 @@ export class FeishuChannel implements Channel {
       if (!groups[chatId]) {
         logger.info({ chatId }, 'Auto-registering new Feishu chat');
         if (this.opts.onAutoRegister) {
-          this.opts.onAutoRegister(chatId);
+          // Fetch real group name from API
+          const groupName = await this.getGroupName(chatId);
+          this.opts.onAutoRegister(chatId, groupName);
         }
       }
 
@@ -976,7 +978,8 @@ export function createFeishuChannel(opts: ChannelOpts): FeishuChannel | null {
     appId,
     appSecret,
     onAutoRegister: opts.onAutoRegister
-      ? (chatId: string) => opts.onAutoRegister!(chatId, 'feishu')
+      ? (chatId: string, groupName?: string) =>
+          opts.onAutoRegister!(chatId, 'feishu', groupName)
       : undefined,
   });
 }

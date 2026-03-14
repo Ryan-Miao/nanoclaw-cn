@@ -1117,10 +1117,11 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
-    onAutoRegister: (chatId: string, channelName: string) => {
+    onAutoRegister: (chatId: string, channelName: string, groupName?: string) => {
       const shortId = chatId.slice(-6);
       const folder = `${channelName}_${shortId}`;
-      const name = `${channelName.charAt(0).toUpperCase() + channelName.slice(1)} Group ${shortId}`;
+      // Use provided group name from API, or fall back to placeholder
+      const name = groupName || `${channelName.charAt(0).toUpperCase() + channelName.slice(1)} Group ${shortId}`;
       registerGroup(chatId, {
         name,
         folder,
