@@ -282,6 +282,9 @@ function buildContainerArgs(
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
+  // Add host.docker.internal resolution (needed on Linux)
+  args.push(...hostGatewayArgs());
+
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 

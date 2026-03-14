@@ -5,7 +5,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         External Channels                           │
-│                    (WhatsApp / 飞书 / Telegram)                     │
+│              (飞书 / +skills: Telegram, Discord, Slack...)          │
 └─────────────────────────────┬───────────────────────────────────────┘
                               │ 消息
                               ▼
@@ -33,7 +33,7 @@
 - 单 Node.js 进程 + 按需启动的容器
 - 主进程不加载 Claude，只负责调度和路由
 - 容器内运行 Claude Agent SDK，拥有完整能力
-- 多渠道支持：WhatsApp、飞书（通过 Channel 接口抽象）
+- 渠道系统：核心仅含飞书，其他渠道（Telegram、Discord、Slack、Gmail）通过 skills 安装
 
 ---
 
@@ -84,14 +84,20 @@ nanoclaw/
 ├── groups/                    # 配置 ──────▶ GitHub ✅
 │   ├── main/
 │   │   ├── CLAUDE.md         # 主群组记忆
+│   │   ├── MEMORY.md         # 永久记忆（决策、偏好）
+│   │   ├── memory/           # 每日日志目录
+│   │   │   └── 2026-03-14.md
 │   │   ├── logs/             # 容器日志
-│   │   └── images/           # 图片文件
+│   │   │   └── container-{ts}.log
+│   │   ├── images/           # 图片文件
+│   │   └── .nanoclaw/        # NanoClaw 元数据
+│   │       └── compact-summary.md
 │   └── global/CLAUDE.md       # 全局共享记忆
 │
 ├── src/                       # 源码 ──────▶ GitHub ✅
 │   ├── channels/
-│   │   ├── whatsapp.ts       # WhatsApp 渠道
-│   │   └── feishu.ts          # 飞书渠道
+│   │   ├── registry.ts       # 渠道注册表
+│   │   └── feishu.ts         # 飞书渠道（核心）
 │   ├── router.ts              # 消息路由、图片处理
 │   └── ...
 ├── container/                 # 容器定义 ──▶ GitHub ✅
@@ -272,7 +278,7 @@ rsync -avz data/ remote:nanoclaw-data/
 ┌────────────────────────────────────────────────────────────────┐
 │                        写入日志文件                             │
 │                                                                 │
-│  data/logs/{folder}/container-{timestamp}.log                  │
+│  groups/{folder}/logs/container-{timestamp}.log                │
 │                                                                 │
 │  内容取决于 LOG_LEVEL 和退出码:                                 │
 │  - 正常退出: 元数据 + Input 摘要                                │
@@ -300,7 +306,7 @@ rsync -avz data/ remote:nanoclaw-data/
 
 - **sessionId** 持久化在 `data/sessions/` 和数据库
 - Claude SDK 通过 sessionId 恢复完整对话历史
-- 会话压缩时，归档到 `data/workspace/{folder}/conversations/`
+- 会话压缩时，归档到 `groups/{folder}/conversations/`
 
 ### 7.3 文件记忆
 
@@ -350,14 +356,16 @@ interface Channel {
 
 ### 9.2 已实现渠道
 
-| 渠道 | JID 格式 | 连接方式 | 特性 |
-|------|---------|---------|------|
-| 飞书 | `oc_xxx` (群) / `ou_xxx` (用户) | WebSocket | 图片收发、长消息上传、自动注册、真实群名 |
-| WhatsApp | `xxx@g.us` / `xxx@s.whatsapp.net` | WebSocket | 打字指示器 |
-| Telegram | `tg:xxx` | HTTP API | 打字指示器 |
-| Discord | `dc:xxx` | WebSocket | 机器人频道 |
-| Slack | `slack:xxx` | Socket Mode | 打字指示器 |
-| Gmail | `gmail:xxx` | OAuth2 | 邮件读写 |
+> **注意**：核心代码仅包含飞书渠道。其他渠道通过 skills 安装（`/add-telegram`、`/add-discord` 等）。
+
+| 渠道 | JID 格式 | 连接方式 | 安装方式 | 特性 |
+|------|---------|---------|---------|------|
+| 飞书 | `oc_xxx` (群) / `ou_xxx` (用户) | WebSocket | 核心 | 图片收发、长消息上传、自动注册、真实群名 |
+| WhatsApp | `xxx@g.us` / `xxx@s.whatsapp.net` | WebSocket | `/add-whatsapp` | 打字指示器 |
+| Telegram | `tg:xxx` | HTTP API | `/add-telegram` | 打字指示器 |
+| Discord | `dc:xxx` | WebSocket | `/add-discord` | 机器人频道 |
+| Slack | `slack:xxx` | Socket Mode | `/add-slack` | 打字指示器 |
+| Gmail | `gmail:xxx` | OAuth2 | `/add-gmail` | 邮件读写 |
 
 ### 9.3 飞书渠道详细说明
 
@@ -415,7 +423,7 @@ interface Channel {
 
 ## 11. 图片处理
 
-### 10.1 接收图片
+### 11.1 接收图片
 
 ```
 用户发送图片 (飞书)
@@ -433,7 +441,7 @@ FeishuChannel.downloadAndSaveImage()
 Agent 使用 Read 工具查看图片
 ```
 
-### 10.2 发送图片
+### 11.2 发送图片
 
 ```
 Agent 生成图片 (markdown 格式)
@@ -491,7 +499,39 @@ API Error: The model has reached its context window limit.
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 12.3 Memory Flush + Compact Summary 流程
+### 12.3 Auto Compact vs Manual /compact
+
+系统提供两种 compact 方式：
+
+| 特性 | Auto Compact | Manual `/compact` |
+|------|-------------|------------------|
+| **触发方式** | 自动（剩余 tokens < 50K） | 手动发送 `/compact` 命令 |
+| **控制权** | 系统自动管理 | 用户主动控制 |
+| **会话处理** | 结束会话，生成 summary，下次启动新会话 | 生成 summary，清空当前会话 |
+| **适用场景** | 防止 API 上下文超限报错 | 用户感觉"对话太长"时主动清理 |
+| **权限** | 无限制（系统自动） | 所有群组可用 |
+
+**工作流程对比**：
+
+```
+Auto Compact (自动):
+  remainingTokens < 50K
+      → 静默 prompt: "生成 summary"
+      → 模型写入 .nanoclaw/compact-summary.md
+      → 容器退出，主进程清除 sessionId
+      → 下次消息 → 新会话 + 注入 summary
+
+Manual /compact (手动):
+  用户发送: "/compact"
+      → 静默 prompt: "生成 summary"
+      → 模型写入 .nanoclaw/compact-summary.md
+      → 主进程清除 sessionId
+      → 后续消息 → 新会话 + 注入 summary
+```
+
+两种方式都会生成 `compact-summary.md` 并归档完整对话到 `conversations/`。
+
+### 12.4 Memory Flush + Compact Summary 流程
 
 ```
 Agent 返回 result 消息
@@ -534,7 +574,7 @@ Agent 返回 result 消息
             注入为上下文 "[CONTEXT FROM PREVIOUS SESSION]"
 ```
 
-### 12.4 Compact Summary 文件
+### 12.5 Compact Summary 文件
 
 位置：`groups/{folder}/.nanoclaw/compact-summary.md`
 
@@ -559,20 +599,69 @@ Agent 返回 result 消息
 - Main channel is self-chat for admin control
 ```
 
-### 12.4 配置项
+### 12.6 配置项
 
 | 环境变量 | 默认值 | 说明 |
 |---------|-------|------|
 | `COMPACT_THRESHOLD_TOKENS` | 50000 | 剩余 tokens < 此值时触发 compact |
 | `MEMORY_FLUSH_THRESHOLD_TOKENS` | 60000 | 剩余 tokens < 此值时触发 memory flush |
 | `MEMORY_FLUSH_PROMPT` | (内置) | 自定义 memory flush 提示 |
+| `CONTEXT_WINDOW` | 200000 | 上下文窗口大小 |
 
 **配置原则**：
 - `MEMORY_FLUSH_THRESHOLD` > `COMPACT_THRESHOLD`（让 flush 先触发）
 - 两者差值约 10K，给 flush 留出足够空间
 - 设为 0 可禁用对应功能
 
-### 12.5 记忆文件结构
+### 12.7 Token 计算机制（Gateway Tokenizer）
+
+系统使用 **Gateway Sidecar + Tokenizer** 方式计算 token，比依赖 API 返回更可靠：
+
+```
+SDK 请求 ──▶ Gateway (sidecar) ──▶ API
+                  │
+                  ├── tokenizer.countTokens(request)
+                  │
+                  ▼
+         .nanoclaw/usage-cache.json
+                  │
+                  ▼
+         /usage 命令 / auto compact 读取
+```
+
+**缓存文件** (`groups/{folder}/.nanoclaw/usage-cache.json`):
+```json
+{
+  "timestamp": "2026-03-14T10:00:00Z",
+  "inputTokens": 50000,
+  "outputTokens": 1000,
+  "contextWindow": 200000,
+  "remainingTokens": 150000,
+  "model": "glm-5",
+  "success": true
+}
+```
+
+**优点**：
+| 特性 | 说明 |
+|------|------|
+| **准确性** | 使用 `gpt-tokenizer` 自计算，不依赖 API 响应 |
+| **实时性** | 每次请求后立即更新 |
+| **独立性** | 不依赖特定 API 提供商的响应格式 |
+| **可靠性** | 即使 API 返回 usage 为空也能工作 |
+
+**数据流**：
+```
+1. SDK 发送请求 → Gateway
+2. Gateway 使用 tokenizer 计算 inputTokens
+3. 转发请求到 API
+4. 收到响应后，更新 usage-cache.json
+   - 优先使用 API 返回的 usage（如果有）
+   - fallback 到 tokenizer 计算值
+5. /usage 和 auto compact 从缓存读取
+```
+
+### 12.8 记忆文件结构
 
 ```
 groups/{folder}/
@@ -593,7 +682,7 @@ groups/{folder}/
     └── ...
 ```
 
-### 12.7 数据流
+### 12.8 数据流
 
 **Container → Host**:
 ```typescript
@@ -647,3 +736,85 @@ if (!sessionId) {
   }
 }
 ```
+
+---
+
+## 13. 会话命令
+
+用户可以通过发送 `/command` 格式的消息执行会话管理操作：
+
+### 13.1 可用命令列表
+
+| 命令 | 说明 | 示例 |
+|------|------|------|
+| `/status` | 查看容器运行状态 | `/status` |
+| `/new` | 创建新会话（清除当前会话） | `/new` |
+| `/usage` | 查看 token 使用情况 | `/usage` |
+| `/compact` | 手动压缩会话（生成摘要并创建新会话） | `/compact` |
+| `/skills` | 查看当前支持的技能列表 | `/skills` |
+| `/groups` | 查看所有已注册群组 | `/groups` |
+| `/groups <folder>` | 查看指定群组详情 | `/groups main` |
+| `/verbose` | 开启详细输出（助手思考 + 工具调用） | `/verbose` |
+| `/quiet` | 只发送最终结果（默认） | `/quiet` |
+| `/help` | 显示帮助信息 | `/help` |
+
+### 13.2 命令处理流程
+
+```
+消息到达 → 检查是否为 /command
+              │
+              ├── Yes → 直接执行命令，返回结果
+              │         （不经过 Agent，主进程处理）
+              │
+              └── No → 正常消息流程
+                        （检查触发词 → 进入队列 → Agent 处理）
+```
+
+### 13.3 输出模式
+
+| 模式 | 说明 |
+|------|------|
+| `quiet` | 只发送最终结果（默认） |
+| `verbose` | 显示助手思考过程和工具调用详情 |
+
+**切换方式**：
+- `/verbose` - 开启详细输出
+- `/quiet` - 切换回安静模式
+
+### 13.4 /usage 命令输出示例
+
+```
+📊 **会话 Token 使用情况**
+
+- 上下文: 45,230 / 200,000 (22.6%)
+- 剩余: 154,770 tokens
+- 会话: 活跃 (a1b2c3d4...)
+- 更新: 5 分钟前
+```
+
+### 13.5 /groups 命令输出示例
+
+**列表模式** (`/groups`):
+```
+📁 **已注册群组 (3个)**
+
+| Folder | 名称 | 触发词 | 输出模式 |
+|--------|------|--------|----------|
+| main | 主控 | 无 | quiet |
+| feishu_9953d4 | 产品讨论群 | @Andy | verbose |
+| feishu_65a3b8 | 技术交流群 | @Andy | quiet |
+```
+
+**详情模式** (`/groups main`):
+```
+📁 **群组: main**
+
+• 名称: 主控
+• JID: ou_xxxx
+• 触发词: 无
+• 输出模式: quiet
+• 添加时间: 2026/3/1
+• 容器超时: 30分钟 (默认)
+• 类型: 主控群组
+```
+

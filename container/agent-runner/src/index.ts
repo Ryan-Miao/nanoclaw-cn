@@ -19,6 +19,34 @@ import path from 'path';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
+// Gateway usage cache file path (written by gateway with tokenizer)
+const USAGE_CACHE_FILE = '/workspace/group/.nanoclaw/usage-cache.json';
+
+interface UsageCache {
+  timestamp: string;
+  inputTokens: number;
+  outputTokens: number;
+  contextWindow: number;
+  remainingTokens: number;
+  success: boolean;
+}
+
+/**
+ * Read usage cache from gateway (tokenizer-computed, more reliable than SDK usage)
+ */
+function readUsageCache(): UsageCache | null {
+  try {
+    if (!fs.existsSync(USAGE_CACHE_FILE)) {
+      return null;
+    }
+    const content = fs.readFileSync(USAGE_CACHE_FILE, 'utf-8');
+    return JSON.parse(content);
+  } catch (err) {
+    log(`Failed to read usage cache: ${err}`);
+    return null;
+  }
+}
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -648,16 +676,22 @@ async function runQuery(
       // Debug: log full usage data
       log(`Usage data: ${JSON.stringify(usage)}`);
 
-      const inputTokens = usage?.input_tokens || 0;  // Total input tokens (already includes cache tokens)
-      const outputTokens = usage?.output_tokens || 0;
-      // Context window is typically 200K for most models
-      const contextWindow = 200000;
+      // Try to get more accurate tokens from gateway cache (tokenizer-computed)
+      const cache = readUsageCache();
+      const sdkInputTokens = usage?.input_tokens || 0;
+      const sdkOutputTokens = usage?.output_tokens || 0;
+
+      // Prefer gateway cache (tokenizer-computed) over SDK usage (may be inaccurate)
+      // Gateway cache is updated after each request with tokenizer calculation
+      const inputTokens = cache?.inputTokens || sdkInputTokens;
+      const outputTokens = cache?.outputTokens || sdkOutputTokens;
+      const contextWindow = 200000;  // Context window is typically 200K for most models
       remainingTokens = contextWindow - inputTokens;
 
       // Store token usage for /usage command
       tokenUsage = { inputTokens, outputTokens, contextWindow };
 
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''} tokens=${inputTokens}/${contextWindow} remaining=${remainingTokens}`);
+      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''} tokens=${inputTokens}/${contextWindow} remaining=${remainingTokens} (sdk=${sdkInputTokens}, cache=${cache?.inputTokens || 'none'})`);
 
       // Check if we need to trigger compact
       const threshold = containerInput.compactThresholdTokens || 0;

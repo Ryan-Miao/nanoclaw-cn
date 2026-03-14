@@ -1,6 +1,7 @@
 /**
  * API Gateway - 代理 Claude Code SDK 请求到 AI API
  * 记录请求和响应的 usage 信息
+ * 使用 tokenizer 自计算 token 数量（不依赖 API 返回）
  */
 
 import http from 'http';
@@ -8,15 +9,62 @@ import https from 'https';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { encode } from 'gpt-tokenizer';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = process.env.GATEWAY_PORT || 8080;
 const TARGET_HOST = process.env.GATEWAY_TARGET_HOST || 'open.bigmodel.cn';
 const TARGET_PORT = parseInt(process.env.GATEWAY_TARGET_PORT || '443');
+const TARGET_USE_HTTPS = TARGET_PORT === 443;  // 只有 443 端口使用 HTTPS
 const LOG_DIR = process.env.GATEWAY_LOG_DIR || '/workspace/group/logs/api';
 const LOG_BODY = process.env.GATEWAY_LOG_BODY === 'true'; // 是否记录完整请求/响应体
 const SESSION_ID = process.env.GATEWAY_SESSION_ID || ''; // 当前会话 ID
+const CONTEXT_WINDOW = parseInt(process.env.CONTEXT_WINDOW || '200000');
+
+// Usage 缓存文件路径
+const USAGE_CACHE_FILE = '/workspace/group/.nanoclaw/usage-cache.json';
+
+// 确保 .nanoclaw 目录存在
+const usageCacheDir = path.dirname(USAGE_CACHE_FILE);
+try {
+  fs.mkdirSync(usageCacheDir, { recursive: true });
+} catch (err) {
+  // 目录可能已存在，忽略错误
+}
+
+/**
+ * 使用 tokenizer 计算请求的 token 数量
+ * 直接计算整个请求 body 的 JSON 字符串
+ */
+function countRequestTokens(request) {
+  // 直接计算整个请求 body 的 token 数
+  // 这是最准确的方式，因为包含了所有内容：
+  // - system prompt
+  // - messages (包括 role、content 等)
+  // - tools 定义
+  // - 其他字段
+  const requestStr = JSON.stringify(request);
+  return encode(requestStr).length;
+}
+
+/**
+ * 更新 usage 缓存文件
+ * 供 /usage 命令和 auto compact 读取
+ */
+function updateUsageCache(data) {
+  const cacheData = {
+    timestamp: new Date().toISOString(),
+    sessionId: SESSION_ID,
+    ...data,
+  };
+
+  try {
+    fs.writeFileSync(USAGE_CACHE_FILE, JSON.stringify(cacheData, null, 2));
+  } catch (err) {
+    console.error(`[gateway] Failed to write usage cache: ${err.message}`);
+  }
+}
 
 // 确保日志目录存在
 try {
@@ -80,6 +128,9 @@ const server = http.createServer(async (req, res) => {
     parsedRequest = { _raw: requestBody.slice(0, 500) };
   }
 
+  // 使用 tokenizer 计算请求的 token 数量
+  const computedInputTokens = countRequestTokens(parsedRequest);
+
   // 检查是否是流式请求
   const isStreaming = parsedRequest.stream === true;
 
@@ -101,7 +152,7 @@ const server = http.createServer(async (req, res) => {
     options.headers.Host = TARGET_HOST;
   }
 
-  const proxyReq = https.request(options, (proxyRes) => {
+  const proxyReq = (TARGET_USE_HTTPS ? https : http).request(options, (proxyRes) => {
     const chunks = [];
     let responseSize = 0;
 
@@ -177,6 +228,26 @@ const server = http.createServer(async (req, res) => {
             ...(LOG_BODY && { body: chunks.join('') }),
           },
         });
+
+        // 更新 usage 缓存（使用 tokenizer 计算的值）
+        const apiInputTokens = usage.input_tokens || usage.prompt_tokens || 0;
+        const apiCacheTokens = usage.cache_read_input_tokens || 0;
+        const outputTokens = usage.output_tokens || usage.completion_tokens || 0;
+
+        // 使用我们计算的值作为 context 使用量（更准确反映当前请求大小）
+        // API 的值保留用于调试和对比
+        updateUsageCache({
+          inputTokens: computedInputTokens,
+          outputTokens: outputTokens,
+          computedInputTokens,  // 我们计算的值
+          apiInputTokens,       // API 返回的新输入 tokens
+          apiCacheTokens,       // API 返回的缓存 tokens
+          apiTotalTokens: apiInputTokens + apiCacheTokens,  // API 总计
+          contextWindow: CONTEXT_WINDOW,
+          remainingTokens: CONTEXT_WINDOW - computedInputTokens,
+          model: parsedRequest.model,
+          success: proxyRes.statusCode === 200,
+        });
       });
     } else {
       // 非流式请求
@@ -225,6 +296,25 @@ const server = http.createServer(async (req, res) => {
             // 完整响应体（可选）
             ...(LOG_BODY && { body: parsedResponse }),
           },
+        });
+
+        // 更新 usage 缓存（使用 tokenizer 计算的值）
+        const apiInputTokens = usage.input_tokens || usage.prompt_tokens || 0;
+        const apiCacheTokens = usage.cache_read_input_tokens || 0;
+        const outputTokens = usage.output_tokens || usage.completion_tokens || 0;
+
+        // 使用我们计算的值作为 context 使用量（更准确反映当前请求大小）
+        updateUsageCache({
+          inputTokens: computedInputTokens,
+          outputTokens: outputTokens,
+          computedInputTokens,  // 我们计算的值
+          apiInputTokens,       // API 返回的新输入 tokens
+          apiCacheTokens,       // API 返回的缓存 tokens
+          apiTotalTokens: apiInputTokens + apiCacheTokens,  // API 总计
+          contextWindow: CONTEXT_WINDOW,
+          remainingTokens: CONTEXT_WINDOW - computedInputTokens,
+          model: parsedRequest.model,
+          success: proxyRes.statusCode === 200,
         });
 
         // 返回响应

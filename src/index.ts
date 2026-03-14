@@ -5,6 +5,7 @@ import {
   ASSISTANT_NAME,
   COMPACT_THRESHOLD_TOKENS,
   CONTEXT_WINDOW,
+  CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   MEMORY_FLUSH_PROMPT,
@@ -13,6 +14,7 @@ import {
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
+import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -28,6 +30,7 @@ import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
   getContainersStatus,
+  PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
   getAllChats,
@@ -79,14 +82,66 @@ let tokenUsageCache: Record<
   }
 > = {};
 
-// Read gateway logs and get last request usage for current session
+// Read usage cache from gateway (tokenizer-computed, more reliable)
+interface UsageCache {
+  timestamp: string;
+  sessionId?: string;
+  inputTokens: number;
+  outputTokens: number;
+  computedInputTokens?: number;
+  apiInputTokens?: number;
+  apiCacheTokens?: number;
+  contextWindow: number;
+  remainingTokens: number;
+  model?: string;
+  success: boolean;
+}
+
+// Legacy: Read gateway logs and get last request usage for current session
 interface GatewayUsage {
   inputTokens: number;
   outputTokens: number;
   lastRequest: string;
 }
 
+/**
+ * Get usage from cache file (written by gateway with tokenizer)
+ * This is the preferred method as it uses tokenizer to compute tokens
+ */
+function getUsageFromCache(groupFolder: string): UsageCache | null {
+  const cachePath = path.join(
+    process.cwd(),
+    'groups',
+    groupFolder,
+    '.nanoclaw',
+    'usage-cache.json',
+  );
+
+  if (!fs.existsSync(cachePath)) {
+    return null;
+  }
+
+  try {
+    const content = fs.readFileSync(cachePath, 'utf-8');
+    return JSON.parse(content);
+  } catch (err) {
+    logger.warn({ err, cachePath }, 'Failed to read usage cache');
+    return null;
+  }
+}
+
 function getGatewayUsage(groupFolder: string): GatewayUsage | null {
+  // First try to read from cache (tokenizer-computed, more reliable)
+  const cache = getUsageFromCache(groupFolder);
+  if (cache && cache.inputTokens > 0) {
+    return {
+      inputTokens: cache.inputTokens,
+      outputTokens: cache.outputTokens,
+      lastRequest: cache.timestamp,
+    };
+  }
+
+  // Fallback: read from API logs (legacy method)
   const date = new Date().toISOString().split('T')[0];
   const logPath = path.join(
     process.cwd(),
@@ -1111,6 +1166,12 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  // Start credential proxy (containers route API calls through this)
+  const proxyServer = await startCredentialProxy(
+    CREDENTIAL_PROXY_PORT,
+    PROXY_BIND_HOST,
+  );
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {

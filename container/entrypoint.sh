@@ -15,9 +15,12 @@ cat > /tmp/input.json
 SESSION_ID=$(cat /tmp/input.json | node -e "const d=require('fs').readFileSync('/dev/stdin','utf8');const j=JSON.parse(d);console.log(j.sessionId||'')")
 
 # 启动 API gateway (后台运行)
+# Gateway 通过 credential proxy 转发请求（host.docker.internal:3001）
 export GATEWAY_LOG_DIR="/workspace/group/logs/api"
 export GATEWAY_LOG_BODY="true"  # 记录完整请求/响应体
 export GATEWAY_SESSION_ID="$SESSION_ID"
+export GATEWAY_TARGET_HOST="host.docker.internal"
+export GATEWAY_TARGET_PORT="3001"
 node /app/gateway/server.js &
 GATEWAY_PID=$!
 
