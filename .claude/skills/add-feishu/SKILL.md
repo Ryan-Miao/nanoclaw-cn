@@ -25,6 +25,7 @@ This skill adds Feishu (飞书/Lark) as a messaging channel to NanoClaw, allowin
 | `im:message.group_at_msg:readonly` | Receive @mention messages in groups |
 | `im:message:send_as_bot` | Send messages as the bot |
 | `im:resource` | Upload files (for long message handling) |
+| `drive:drive` | Access to Feishu Drive (for document upload) |
 
 ### Event Subscriptions
 
@@ -73,6 +74,10 @@ FEISHU_ADMIN_USER_ID=your_user_id  # Optional: for folder permission grants
 ### Start the service
 
 ```bash
+# Linux (systemd)
+systemctl --user restart nanoclaw
+
+# macOS (launchd)
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
 
@@ -80,10 +85,25 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 
 | File | Change |
 |------|--------|
-| `src/channels/feishu.ts` | New file: Feishu channel implementation |
-| `src/config.ts` | Added feishu config exports |
-| `src/index.ts` | Register feishu channel |
+| `src/channels/feishu.ts` | Feishu channel implementation with factory function |
+| `src/channels/registry.ts` | Channel factory registry pattern |
+| `src/channels/index.ts` | Barrel import for channel self-registration |
+| `src/config.ts` | Added Feishu document config exports |
+| `src/index.ts` | Channel registry initialization |
 | `package.json` | Added `@larksuiteoapi/node-sdk` dependency |
+
+## Architecture
+
+The skill uses the **Channel Registry Pattern**:
+
+```
+src/channels/
+├── index.ts      # Barrel import (triggers self-registration)
+├── registry.ts   # Factory registry (registerChannel, getChannelFactory)
+└── feishu.ts     # Feishu implementation + createFeishuChannel factory
+```
+
+Channels self-register via `registerChannel('feishu', createFeishuChannel)` at module load time. The main `index.ts` iterates over registered channels and initializes them if credentials are available.
 
 ## Features
 
@@ -113,6 +133,5 @@ tail -f logs/nanoclaw.log | grep -i feishu
 
 # Test sending a message
 # 1. DM the bot in Feishu
-# 2. Check that you bot responds
+# 2. Check that the bot responds
 ```
-

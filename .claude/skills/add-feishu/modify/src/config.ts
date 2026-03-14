@@ -4,8 +4,8 @@ import path from 'path';
 import { readEnvFile } from './env.js';
 
 // Read config values from .env (falls back to process.env).
-// Secrets are NOT read here — they stay on disk and are loaded only
-// where needed (container-runner.ts) to avoid leaking to child processes.
+// Secrets (API keys, tokens) are NOT read here — they are loaded only
+// by the credential proxy (credential-proxy.ts), never exposed to containers.
 const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
 
 export const ASSISTANT_NAME =
@@ -27,10 +27,15 @@ export const MOUNT_ALLOWLIST_PATH = path.join(
   'nanoclaw',
   'mount-allowlist.json',
 );
+export const SENDER_ALLOWLIST_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclaw',
+  'sender-allowlist.json',
+);
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
-export const MAIN_GROUP_FOLDER = 'main';
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
@@ -42,6 +47,10 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
 ); // 10MB default
+export const CREDENTIAL_PROXY_PORT = parseInt(
+  process.env.CREDENTIAL_PROXY_PORT || '3001',
+  10,
+);
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
@@ -63,6 +72,9 @@ export const TRIGGER_PATTERN = new RegExp(
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+// Main group folder (receives all messages without trigger)
+export const MAIN_GROUP_FOLDER = 'main';
+
 // Feishu document settings
 export const FEISHU_DOC_THRESHOLD = parseInt(
   process.env.FEISHU_DOC_THRESHOLD || '2000',
@@ -70,10 +82,26 @@ export const FEISHU_DOC_THRESHOLD = parseInt(
 ); // characters threshold - if message is longer, create a document
 export const FEISHU_DOC_TITLE = 'NanoClaw 消息文档';
 
-// Feishu configuration check (secrets read directly where needed, not exported here)
-export const hasFeishuConfig = (): boolean => {
-  return !!(
-    process.env.FEISHU_APP_ID &&
-    process.env.FEISHU_APP_SECRET
-  );
-};
+// Context window size for the model (in tokens)
+// GLM-5: 200,000 tokens
+export const CONTEXT_WINDOW = parseInt(
+  process.env.CONTEXT_WINDOW || '200000',
+  10,
+);
+
+// Context management: trigger compact when remaining tokens < threshold
+// Default 50K for 200K context models (like GLM-5)
+// Set to 0 to disable automatic compact
+export const COMPACT_THRESHOLD_TOKENS = parseInt(
+  process.env.COMPACT_THRESHOLD_TOKENS || '50000',
+  10,
+);
+
+// Memory flush: trigger silent turn to write memories before compact
+// Should be higher than COMPACT_THRESHOLD_TOKENS to flush first
+// Default 60K (10K buffer before compact)
+// Set to 0 to disable memory flush
+export const MEMORY_FLUSH_THRESHOLD_TOKENS = parseInt(
+  process.env.MEMORY_FLUSH_THRESHOLD_TOKENS || '60000',
+  10,
+);

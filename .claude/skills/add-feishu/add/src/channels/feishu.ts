@@ -639,3 +639,28 @@ export class FeishuChannel implements Channel {
     logger.info({ chatId, chunkCount: chunks.length }, 'Sent message in chunks');
   }
 }
+
+// Factory function for channel registry
+import { ChannelOpts, registerChannel } from './registry.js';
+import { readEnvFile } from '../env.js';
+
+export function createFeishuChannel(
+  opts: ChannelOpts,
+): FeishuChannel | null {
+  const feishuSecrets = readEnvFile(['FEISHU_APP_ID', 'FEISHU_APP_SECRET']);
+  const appId = process.env.FEISHU_APP_ID || feishuSecrets.FEISHU_APP_ID;
+  const appSecret = process.env.FEISHU_APP_SECRET || feishuSecrets.FEISHU_APP_SECRET;
+
+  if (!appId || !appSecret) {
+    return null;
+  }
+
+  return new FeishuChannel({
+    ...opts,
+    appId,
+    appSecret,
+  });
+}
+
+// Self-register
+registerChannel('feishu', createFeishuChannel);

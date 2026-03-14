@@ -7,10 +7,13 @@ import {
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
-  hasFeishuConfig,
 } from './config.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
-import { FeishuChannel } from './channels/feishu.js';
+// Channel registry pattern - channels self-register via barrel import
+import './channels/index.js';
+import {
+  getChannelFactory,
+  getRegisteredChannelNames,
+} from './channels/registry.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -53,8 +56,6 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
-let feishu: FeishuChannel | undefined;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -477,30 +478,24 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  // Initialize channels using registry pattern
+  for (const channelName of getRegisteredChannelNames()) {
+    const factory = getChannelFactory(channelName)!;
+    const channel = factory(channelOpts);
+    if (!channel) {
+      logger.warn(
+        { channel: channelName },
+        'Channel installed but credentials missing — skipping.',
+      );
+      continue;
+    }
+    channels.push(channel);
+    await channel.connect();
+  }
 
-  // Conditionally create Feishu channel if configured
-  if (hasFeishuConfig()) {
-    feishu = new FeishuChannel({
-      ...channelOpts,
-      appId: process.env.FEISHU_APP_ID!,
-      appSecret: process.env.FEISHU_APP_SECRET!,
-      onAutoRegister: (chatId: string) => {
-        // Auto-register new feishu groups with a generated folder name
-        const folder = `feishu_${chatId.slice(-6)}`;
-        registerGroup(chatId, {
-          name: `Feishu Group ${chatId.slice(-6)}`,
-          folder,
-          trigger: '',
-          added_at: new Date().toISOString(),
-        });
-      },
-    });
-    channels.push(feishu);
-    await feishu.connect();
+  if (channels.length === 0) {
+    logger.error('No channels available. Please configure at least one channel.');
+    process.exit(1);
   }
 
   // Start subsystems (independently of connection handler)
@@ -528,8 +523,7 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) =>
-      whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: (force) => Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
