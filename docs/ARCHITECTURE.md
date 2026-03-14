@@ -352,10 +352,41 @@ interface Channel {
 
 | 渠道 | JID 格式 | 连接方式 | 特性 |
 |------|---------|---------|------|
+| 飞书 | `oc_xxx` (群) / `ou_xxx` (用户) | WebSocket | 图片收发、长消息上传、自动注册、真实群名 |
 | WhatsApp | `xxx@g.us` / `xxx@s.whatsapp.net` | WebSocket | 打字指示器 |
-| 飞书 | `oc_xxx` (群) / `ou_xxx` (用户) | WebSocket | 图片收发、自动注册 |
+| Telegram | `tg:xxx` | HTTP API | 打字指示器 |
+| Discord | `dc:xxx` | WebSocket | 机器人频道 |
+| Slack | `slack:xxx` | Socket Mode | 打字指示器 |
+| Gmail | `gmail:xxx` | OAuth2 | 邮件读写 |
 
-### 9.3 消息路由
+### 9.3 飞书渠道详细说明
+
+**连接方式**：WebSocket（无需公网 URL，支持 NAT/防火墙环境）
+
+**消息类型支持**：
+- 文本消息：直接处理
+- 图片消息：下载到 `groups/{folder}/images/`，路径注入消息内容
+
+**长消息处理**：
+- 阈值：`FEISHU_DOC_THRESHOLD`（默认 2000 字符）
+- 超过阈值时上传 Markdown 文件到飞书云盘
+- 文件组织：`Plans/{GroupName}/{title}_{timestamp}.md`
+- 自动生成标题：从内容中提取 Markdown 标题或首行
+
+**群组自动注册**：
+- 新群组收到消息时自动注册
+- 通过 API 获取真实群组名称
+- 文件夹命名：`feishu_{chatId后6位}`
+
+**配置项**：
+| 环境变量 | 说明 | 默认值 |
+|---------|------|-------|
+| `FEISHU_APP_ID` | 飞书应用 ID | 必填 |
+| `FEISHU_APP_SECRET` | 飞书应用密钥 | 必填 |
+| `FEISHU_ADMIN_USER_ID` | 管理员用户 ID（用于文件权限） | 可选 |
+| `FEISHU_DOC_THRESHOLD` | 长消息阈值 | 2000 |
+
+### 9.4 消息路由
 
 ```
 消息到达 → findChannel(channels, jid) → channel.sendMessage()
