@@ -48,6 +48,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { isTriggerAllowed, loadSenderAllowlist } from './sender-allowlist.js';
 import {
   findChannel,
   formatMessages,
