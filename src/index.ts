@@ -860,41 +860,83 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
-          // Check for /groups command - list all registered groups
-          const groupsMessage = groupMessages.find(
-            (m) => m.content.trim().toLowerCase() === '/groups',
+          // Check for /groups command - list all registered groups or show details
+          const groupsMessage = groupMessages.find((m) =>
+            m.content.trim().toLowerCase().startsWith('/groups'),
           );
           if (groupsMessage) {
             logger.info(
               { chatJid, group: group.name },
               '/groups command received',
             );
-            const groupsList = Object.entries(registeredGroups);
+
+            const args = groupsMessage.content.trim().slice(7).trim(); // Remove '/groups'
             let response: string;
 
-            if (groupsList.length === 0) {
-              response = '📁 暂无已注册的群组';
+            if (!args) {
+              // List all groups
+              const groupsList = Object.entries(registeredGroups);
+
+              if (groupsList.length === 0) {
+                response = '📁 暂无已注册的群组';
+              } else {
+                const lines = [`📁 **已注册群组 (${groupsList.length}个)**\n`];
+
+                // Table header
+                lines.push('| Folder | 名称 | 触发词 | 输出模式 |');
+                lines.push('|--------|------|--------|----------|');
+
+                // Sort: main first, then alphabetically
+                const sorted = groupsList.sort((a, b) => {
+                  if (a[1].isMain) return -1;
+                  if (b[1].isMain) return 1;
+                  return a[1].folder.localeCompare(b[1].folder);
+                });
+
+                for (const [jid, grp] of sorted) {
+                  const trigger = grp.isMain ? '无' : grp.trigger;
+                  const outputLevel = grp.containerConfig?.outputLevel || 'quiet';
+                  lines.push(`| ${grp.folder} | ${grp.name} | ${trigger} | ${outputLevel} |`);
+                }
+
+                response = lines.join('\n');
+              }
             } else {
-              const lines = [`📁 **已注册群组 (${groupsList.length}个)**\n`];
+              // Show details for specific group
+              const folder = args;
+              const [jid, grp] =
+                Object.entries(registeredGroups).find(
+                  ([_, g]) => g.folder === folder,
+                ) || [];
 
-              // Table header
-              lines.push('| Folder | 名称 | 触发词 | 输出模式 |');
-              lines.push('|--------|------|--------|----------|');
-
-              // Sort: main first, then alphabetically
-              const sorted = groupsList.sort((a, b) => {
-                if (a[1].isMain) return -1;
-                if (b[1].isMain) return 1;
-                return a[1].folder.localeCompare(b[1].folder);
-              });
-
-              for (const [jid, grp] of sorted) {
+              if (!grp) {
+                response = `❌ 未找到群组: ${folder}\n\n使用 /groups 查看所有群组列表。`;
+              } else {
                 const trigger = grp.isMain ? '无' : grp.trigger;
                 const outputLevel = grp.containerConfig?.outputLevel || 'quiet';
-                lines.push(`| ${grp.folder} | ${grp.name} | ${trigger} | ${outputLevel} |`);
-              }
+                const timeout = grp.containerConfig?.timeout
+                  ? `${Math.round(grp.containerConfig.timeout / 60000)}分钟`
+                  : '30分钟 (默认)';
+                const addedAt = grp.added_at
+                  ? new Date(grp.added_at).toLocaleDateString('zh-CN')
+                  : '未知';
 
-              response = lines.join('\n');
+                const lines = [
+                  `📁 **群组: ${grp.folder}**\n`,
+                  `• 名称: ${grp.name}`,
+                  `• JID: ${jid}`,
+                  `• 触发词: ${trigger}`,
+                  `• 输出模式: ${outputLevel}`,
+                  `• 添加时间: ${addedAt}`,
+                  `• 容器超时: ${timeout}`,
+                ];
+
+                if (grp.isMain) {
+                  lines.push('• 类型: 主控群组');
+                }
+
+                response = lines.join('\n');
+              }
             }
 
             await channel.sendMessage(chatJid, response);
