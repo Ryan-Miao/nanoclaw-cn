@@ -286,7 +286,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // 处理 streaming 状态的消息
     if (result.status === 'streaming') {
-      if (result.result) {
+      const outputLevel = group.containerConfig?.outputLevel || 'quiet';
+      if (outputLevel === 'verbose' && result.result) {
         // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
         const raw = result.result
           .replace(/<internal>[\s\S]*?<\/internal>/g, '')
@@ -835,6 +836,7 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, group: group.name },
               '/help command received',
             );
+            const currentLevel = group.containerConfig?.outputLevel || 'quiet';
             const response = `📖 **可用命令**
 
 • /status - 查看容器运行状态
@@ -842,13 +844,107 @@ async function startMessageLoop(): Promise<void> {
 • /usage - 查看 token 使用情况
 • /compact - 压缩会话（生成摘要并创建新会话）
 • /skills - 查看当前支持的技能列表
+• /groups - 查看所有已注册群组
+• /verbose - 开启详细输出（助手思考 + 工具调用）
+• /quiet - 只发送最终结果（默认）
 • /help - 显示此帮助信息
+
+📡 当前输出级别: ${currentLevel}
 
 💡 提示：
 - 普通消息需要以触发词开头（如 @Andy）
 - 主频道无需触发词，所有消息都会被处理`;
             await channel.sendMessage(chatJid, response);
             lastAgentTimestamp[chatJid] = helpMessage.timestamp;
+            saveState();
+            continue;
+          }
+
+          // Check for /groups command - list all registered groups
+          const groupsMessage = groupMessages.find(
+            (m) => m.content.trim().toLowerCase() === '/groups',
+          );
+          if (groupsMessage) {
+            logger.info(
+              { chatJid, group: group.name },
+              '/groups command received',
+            );
+            const groupsList = Object.entries(registeredGroups);
+            let response: string;
+
+            if (groupsList.length === 0) {
+              response = '📁 暂无已注册的群组';
+            } else {
+              const lines = [`📁 **已注册群组 (${groupsList.length}个)**\n`];
+
+              // Table header
+              lines.push('| Folder | 名称 | 触发词 | 输出模式 |');
+              lines.push('|--------|------|--------|----------|');
+
+              // Sort: main first, then alphabetically
+              const sorted = groupsList.sort((a, b) => {
+                if (a[1].isMain) return -1;
+                if (b[1].isMain) return 1;
+                return a[1].folder.localeCompare(b[1].folder);
+              });
+
+              for (const [jid, grp] of sorted) {
+                const trigger = grp.isMain ? '无' : grp.trigger;
+                const outputLevel = grp.containerConfig?.outputLevel || 'quiet';
+                lines.push(`| ${grp.folder} | ${grp.name} | ${trigger} | ${outputLevel} |`);
+              }
+
+              response = lines.join('\n');
+            }
+
+            await channel.sendMessage(chatJid, response);
+            lastAgentTimestamp[chatJid] = groupsMessage.timestamp;
+            saveState();
+            continue;
+          }
+
+          // Check for /verbose command - enable detailed streaming output
+          const verboseMessage = groupMessages.find(
+            (m) => m.content.trim().toLowerCase() === '/verbose',
+          );
+          if (verboseMessage) {
+            logger.info(
+              { chatJid, group: group.name },
+              '/verbose command received',
+            );
+            group.containerConfig = {
+              ...group.containerConfig,
+              outputLevel: 'verbose',
+            };
+            setRegisteredGroup(chatJid, group);
+            await channel.sendMessage(
+              chatJid,
+              '📡 已开启详细输出，将显示助手思考过程和工具调用。',
+            );
+            lastAgentTimestamp[chatJid] = verboseMessage.timestamp;
+            saveState();
+            continue;
+          }
+
+          // Check for /quiet command - only send final results
+          const quietMessage = groupMessages.find(
+            (m) => m.content.trim().toLowerCase() === '/quiet',
+          );
+          if (quietMessage) {
+            logger.info(
+              { chatJid, group: group.name },
+              '/quiet command received',
+            );
+            group.containerConfig = {
+              ...group.containerConfig,
+              outputLevel: 'quiet',
+            };
+            setRegisteredGroup(chatJid, group);
+            await channel.sendMessage(
+              chatJid,
+              '🔇 已切换为安静模式，只发送最终结果。',
+            );
+            lastAgentTimestamp[chatJid] = quietMessage.timestamp;
             saveState();
             continue;
           }
@@ -976,6 +1072,19 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    onAutoRegister: (chatId: string, channelName: string) => {
+      const shortId = chatId.slice(-6);
+      const folder = `${channelName}_${shortId}`;
+      const name = `${channelName.charAt(0).toUpperCase() + channelName.slice(1)} Group ${shortId}`;
+      registerGroup(chatId, {
+        name,
+        folder,
+        trigger: `@${ASSISTANT_NAME}`,
+        added_at: new Date().toISOString(),
+        requiresTrigger: false,
+      });
+      logger.info({ chatId, name, folder }, 'Auto-registered new group');
+    },
   };
 
   // Create and connect all registered channels.
